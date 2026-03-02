@@ -33,7 +33,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Generated prompt files (from scripts/generate-prompts.ts)
+# Legacy generated prompt files
 lib/prompts/**/*.generated.ts
 
 # Tests

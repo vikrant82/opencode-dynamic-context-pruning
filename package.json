@@ -8,12 +8,10 @@
     "types": "./dist/index.d.ts",
     "scripts": {
         "clean": "rm -rf dist",
-        "generate:prompts": "tsx scripts/generate-prompts.ts",
-        "prebuild": "npm run generate:prompts",
         "build": "npm run clean && tsc",
         "prepublishOnly": "npm run build",
         "dev": "opencode plugin dev",
-        "typecheck": "npm run generate:prompts && tsc --noEmit",
+        "typecheck": "tsc --noEmit",
         "test": "node --import tsx --test tests/*.test.ts",
         "format": "prettier --write .",
         "format:check": "prettier --check .",

@@ -1,6 +1,7 @@
 import type { SessionState, WithParts } from "../../state"
 import type { Logger } from "../../logger"
 import type { PluginConfig } from "../../config"
+import type { RuntimePrompts } from "../../prompts/store"
 import { formatMessageIdTag } from "../../message-ids"
 import { getLastUserMessage } from "../../shared-utils"
 import { saveSessionState } from "../../state/persistence"
@@ -29,6 +30,7 @@ export const injectCompressNudges = (
     config: PluginConfig,
     logger: Logger,
     messages: WithParts[],
+    prompts: RuntimePrompts,
 ): void => {
     if (config.compress.permission === "deny") {
         return
@@ -127,7 +129,7 @@ export const injectCompressNudges = (
         }
     }
 
-    applyAnchoredNudges(state, config, messages, modelId)
+    applyAnchoredNudges(state, config, messages, modelId, prompts)
 
     if (anchorsChanged) {
         void saveSessionState(state, logger)

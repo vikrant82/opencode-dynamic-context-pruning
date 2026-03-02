@@ -23,6 +23,7 @@ import { handleDecompressCommand } from "./commands/decompress"
 import { handleRecompressCommand } from "./commands/recompress"
 import { ensureSessionInitialized } from "./state/state"
 import { cacheSystemPromptTokens } from "./ui/utils"
+import type { PromptStore } from "./prompts/store"
 
 const INTERNAL_AGENT_SIGNATURES = [
     "You are a title generator",
@@ -71,6 +72,7 @@ export function createSystemPromptHandler(
     state: SessionState,
     logger: Logger,
     config: PluginConfig,
+    prompts: PromptStore,
 ) {
     return async (
         input: { sessionID?: string; model: { limit: { context: number } } },
@@ -95,7 +97,10 @@ export function createSystemPromptHandler(
             return
         }
 
+        prompts.reload()
+        const runtimePrompts = prompts.getRuntimePrompts()
         const newPrompt = renderSystemPrompt(
+            runtimePrompts,
             state.manualMode,
             state.isSubAgent && config.experimental.allowSubAgents,
         )
@@ -112,6 +117,7 @@ export function createChatMessageTransformHandler(
     state: SessionState,
     logger: Logger,
     config: PluginConfig,
+    prompts: PromptStore,
 ) {
     return async (input: {}, output: { messages: WithParts[] }) => {
         await checkSession(client, state, logger, output.messages, config.manualMode.enabled)
@@ -134,7 +140,8 @@ export function createChatMessageTransformHandler(
             output.messages,
             config.experimental.allowSubAgents,
         )
-        injectCompressNudges(state, config, logger, output.messages)
+        prompts.reload()
+        injectCompressNudges(state, config, logger, output.messages, prompts.getRuntimePrompts())
         injectMessageIds(state, config, output.messages)
         applyManualPrompt(state, output.messages, logger)
         stripStaleMetadata(output.messages)

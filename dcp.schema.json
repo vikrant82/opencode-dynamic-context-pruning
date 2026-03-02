@@ -103,10 +103,16 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Allow DCP processing in subagent sessions"
+                },
+                "customPrompts": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable user-editable prompt overrides under dcp-prompts directories"
                 }
             },
             "default": {
-                "allowSubAgents": false
+                "allowSubAgents": false,
+                "customPrompts": false
             }
         },
         "protectedFilePatterns": {

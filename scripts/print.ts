@@ -1,6 +1,30 @@
 #!/usr/bin/env npx tsx
 
-import { renderSystemPrompt, renderNudge } from "../lib/prompts"
+import { Logger } from "../lib/logger"
+import { renderSystemPrompt } from "../lib/prompts"
+import { PromptStore, PROMPT_KEYS, type PromptKey, type RuntimePrompts } from "../lib/prompts/store"
+
+function normalizePromptKey(value: string): PromptKey | null {
+    const normalized = value.trim().toLowerCase()
+    return PROMPT_KEYS.includes(normalized as PromptKey) ? (normalized as PromptKey) : null
+}
+
+function getPromptByKey(prompts: RuntimePrompts, key: PromptKey): string {
+    switch (key) {
+        case "system":
+            return prompts.system
+        case "compress":
+            return prompts.compress
+        case "context-limit-nudge":
+            return prompts.contextLimitNudge
+        case "user-turn-nudge":
+            return prompts.userTurnNudge
+        case "assistant-turn-nudge":
+            return prompts.assistantTurnNudge
+        case "iteration-nudge":
+            return prompts.iterationNudge
+    }
+}
 
 const args = process.argv.slice(2)
 const showHelp = args.includes("-h") || args.includes("--help")
@@ -10,36 +34,72 @@ if (showHelp) {
 DCP Prompt Preview CLI
 
 Usage:
-  bun run dcp [TYPE]
+  npm run dcp -- [options]
 
-Types:
-  --system            Print system prompt
-  --nudge             Print standard nudge prompt
-  --compress-nudge    Print context-limit compress nudge
+Options:
+  --list                   List available prompt keys
+  --show <key>             Print effective prompt text for key
+  --system                 Print effective system prompt with no overlays
+  --system-manual          Print system prompt with manual overlay
+  --system-subagent        Print system prompt with subagent overlay
+  --system-all             Print system prompt with both overlays
+
+Prompt keys:
+  system, compress, context-limit-nudge,
+  user-turn-nudge, assistant-turn-nudge, iteration-nudge
 
 Examples:
-  bun run dcp --system
-  bun run dcp --nudge
-  bun run dcp --compress-nudge
+  npm run dcp -- --list
+  npm run dcp -- --show compress
+  npm run dcp -- --system-all
 `)
     process.exit(0)
 }
 
-const isSystem = args.includes("--system") || args.length === 0
-const isNudge = args.includes("--nudge")
-const isCompressNudge = args.includes("--compress-nudge")
+const store = new PromptStore(new Logger(false), process.cwd())
+store.reload()
 
-if (isSystem) {
-    console.log("=== SYSTEM ===\n")
-    console.log(renderSystemPrompt())
+const runtimePrompts = store.getRuntimePrompts()
+
+if (args.includes("--list")) {
+    console.log("Available prompts:")
+    for (const key of PROMPT_KEYS) {
+        console.log(`- ${key}`)
+    }
+    process.exit(0)
 }
 
-if (isNudge) {
-    console.log("=== NUDGE ===\n")
-    console.log(renderNudge("frequency"))
+const showIndex = args.indexOf("--show")
+if (showIndex >= 0) {
+    const keyArg = args[showIndex + 1]
+    if (!keyArg) {
+        console.error("Missing prompt key for --show")
+        process.exit(1)
+    }
+
+    const key = normalizePromptKey(keyArg)
+    if (!key) {
+        console.error(`Unknown prompt key: ${keyArg}`)
+        process.exit(1)
+    }
+
+    console.log(getPromptByKey(runtimePrompts, key))
+    process.exit(0)
 }
 
-if (isCompressNudge) {
-    console.log("=== COMPRESS NUDGE ===\n")
-    console.log(renderNudge("context-limit"))
+if (args.includes("--system-all")) {
+    console.log(renderSystemPrompt(runtimePrompts, true, true))
+    process.exit(0)
 }
+
+if (args.includes("--system-manual")) {
+    console.log(renderSystemPrompt(runtimePrompts, true, false))
+    process.exit(0)
+}
+
+if (args.includes("--system-subagent")) {
+    console.log(renderSystemPrompt(runtimePrompts, false, true))
+    process.exit(0)
+}
+
+console.log(renderSystemPrompt(runtimePrompts, false, false))

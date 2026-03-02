@@ -1,5 +1,6 @@
 import type { SessionState, WithParts } from "../../state"
 import type { PluginConfig } from "../../config"
+import type { RuntimePrompts } from "../../prompts/store"
 import type { UserMessage } from "@opencode-ai/sdk/v2"
 import {
     createSyntheticTextPart,
@@ -9,9 +10,6 @@ import {
 } from "../utils"
 import { getLastUserMessage } from "../../shared-utils"
 import { getCurrentTokenUsage } from "../../strategies/utils"
-import { CONTEXT_LIMIT_NUDGE } from "../../prompts/context-limit-nudge"
-import { USER_TURN_NUDGE, ASSISTANT_TURN_NUDGE } from "../../prompts/turn-nudge"
-import { ITERATION_NUDGE } from "../../prompts/iteration-nudge"
 
 export interface LastUserModelContext {
     providerId: string | undefined
@@ -244,11 +242,12 @@ export function applyAnchoredNudges(
     config: PluginConfig,
     messages: WithParts[],
     modelId: string | undefined,
+    prompts: RuntimePrompts,
 ): void {
     const compressedBlockGuidance = buildCompressedBlockGuidance(state)
 
     const contextLimitNudge = appendGuidanceToInstructionXml(
-        CONTEXT_LIMIT_NUDGE,
+        prompts.contextLimitNudge,
         compressedBlockGuidance,
     )
 
@@ -257,7 +256,7 @@ export function applyAnchoredNudges(
     const turnNudgeAnchors = new Set<string>()
     const targetRole = config.compress.nudgeForce === "strong" ? "user" : "assistant"
     const promptToUse =
-        config.compress.nudgeForce === "strong" ? USER_TURN_NUDGE : ASSISTANT_TURN_NUDGE
+        config.compress.nudgeForce === "strong" ? prompts.userTurnNudge : prompts.assistantTurnNudge
     const turnNudge = appendGuidanceToInstructionXml(promptToUse, compressedBlockGuidance)
 
     for (const message of messages) {
@@ -270,6 +269,9 @@ export function applyAnchoredNudges(
 
     applyAnchoredNudge(turnNudgeAnchors, messages, modelId, turnNudge)
 
-    const iterationNudge = appendGuidanceToInstructionXml(ITERATION_NUDGE, compressedBlockGuidance)
+    const iterationNudge = appendGuidanceToInstructionXml(
+        prompts.iterationNudge,
+        compressedBlockGuidance,
+    )
     applyAnchoredNudge(state.nudges.iterationNudgeAnchors, messages, modelId, iterationNudge)
 }

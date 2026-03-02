@@ -1,21 +1,40 @@
-import { SYSTEM as SYSTEM_PROMPT } from "./_codegen/system.generated"
+import type { RuntimePrompts } from "./store"
 
-function stripConditionalTag(content: string, tagName: string): string {
-    const regex = new RegExp(`<${tagName}>[\\s\\S]*?</${tagName}>`, "g")
-    return content.replace(regex, "")
+function stripLegacyInlineComments(content: string): string {
+    return content.replace(/^[ \t]*\/\/.*?\/\/[ \t]*$/gm, "")
 }
 
-export function renderSystemPrompt(manual?: boolean, subagent?: boolean): string {
-    let result = SYSTEM_PROMPT
-    result = result.replace(/\/\/.*?\/\//g, "")
-
-    if (!manual) {
-        result = stripConditionalTag(result, "manual")
+function injectIntoSystemReminder(systemPrompt: string, overlays: string[]): string {
+    if (overlays.length === 0) {
+        return systemPrompt
     }
 
-    if (!subagent) {
-        result = stripConditionalTag(result, "subagent")
+    const closeTag = "</system-reminder>"
+    const closeTagIndex = systemPrompt.lastIndexOf(closeTag)
+    if (closeTagIndex === -1) {
+        return [systemPrompt, ...overlays].join("\n\n")
     }
 
-    return result.replace(/\n([ \t]*\n)+/g, "\n\n").trim()
+    const beforeClose = systemPrompt.slice(0, closeTagIndex).trimEnd()
+    const afterClose = systemPrompt.slice(closeTagIndex)
+    return `${beforeClose}\n\n${overlays.join("\n\n")}\n\n${afterClose}`
+}
+
+export function renderSystemPrompt(
+    prompts: RuntimePrompts,
+    manual?: boolean,
+    subagent?: boolean,
+): string {
+    const overlays: string[] = []
+    if (manual) {
+        overlays.push(prompts.manualOverlay.trim())
+    }
+
+    if (subagent) {
+        overlays.push(prompts.subagentOverlay.trim())
+    }
+
+    const strippedSystem = stripLegacyInlineComments(prompts.system).trim()
+    const withOverlays = injectIntoSystemReminder(strippedSystem, overlays)
+    return withOverlays.replace(/\n([ \t]*\n)+/g, "\n\n").trim()
 }

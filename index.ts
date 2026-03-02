@@ -3,6 +3,7 @@ import { getConfig } from "./lib/config"
 import { Logger } from "./lib/logger"
 import { createSessionState } from "./lib/state"
 import { createCompressTool } from "./lib/tools"
+import { PromptStore } from "./lib/prompts/store"
 import {
     createChatMessageTransformHandler,
     createCommandExecuteHandler,
@@ -20,6 +21,7 @@ const plugin: Plugin = (async (ctx) => {
 
     const logger = new Logger(config.debug)
     const state = createSessionState()
+    const prompts = new PromptStore(logger, ctx.directory, config.experimental.customPrompts)
 
     if (isSecureMode()) {
         configureClientAuth(ctx.client)
@@ -31,13 +33,19 @@ const plugin: Plugin = (async (ctx) => {
     })
 
     return {
-        "experimental.chat.system.transform": createSystemPromptHandler(state, logger, config),
+        "experimental.chat.system.transform": createSystemPromptHandler(
+            state,
+            logger,
+            config,
+            prompts,
+        ),
 
         "experimental.chat.messages.transform": createChatMessageTransformHandler(
             ctx.client,
             state,
             logger,
             config,
+            prompts,
         ) as any,
         "chat.message": async (
             input: {
@@ -70,6 +78,7 @@ const plugin: Plugin = (async (ctx) => {
                     logger,
                     config,
                     workingDirectory: ctx.directory,
+                    prompts,
                 }),
             }),
         },

@@ -1,6 +1,5 @@
 import { tool } from "@opencode-ai/plugin"
 import type { ToolContext } from "./types"
-import { COMPRESS } from "../prompts/compress"
 import { ensureSessionInitialized } from "../state"
 import {
     appendProtectedTools,
@@ -26,8 +25,11 @@ import { saveSessionState } from "../state/persistence"
 import { sendCompressNotification } from "../ui/notification"
 
 export function createCompressTool(ctx: ToolContext): ReturnType<typeof tool> {
+    ctx.prompts.reload()
+    const runtimePrompts = ctx.prompts.getRuntimePrompts()
+
     return tool({
-        description: COMPRESS,
+        description: runtimePrompts.compress,
         args: {
             topic: tool.schema
                 .string()

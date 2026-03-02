@@ -51,6 +51,7 @@ export interface TurnProtection {
 
 export interface ExperimentalConfig {
     allowSubAgents: boolean
+    customPrompts: boolean
 }
 
 export interface PluginConfig {
@@ -75,6 +76,7 @@ type CompressOverride = Partial<CompressTool>
 
 const DEFAULT_PROTECTED_TOOLS = [
     "task",
+    "skill",
     "todowrite",
     "todoread",
     "compress",
@@ -83,7 +85,7 @@ const DEFAULT_PROTECTED_TOOLS = [
     "plan_exit",
 ]
 
-const COMPRESS_DEFAULT_PROTECTED_TOOLS = ["task", "todowrite", "todoread"]
+const COMPRESS_DEFAULT_PROTECTED_TOOLS = ["task", "skill", "todowrite", "todoread"]
 
 export const VALID_CONFIG_KEYS = new Set([
     "$schema",
@@ -97,6 +99,7 @@ export const VALID_CONFIG_KEYS = new Set([
     "turnProtection.turns",
     "experimental",
     "experimental.allowSubAgents",
+    "experimental.customPrompts",
     "protectedFilePatterns",
     "commands",
     "commands.enabled",
@@ -257,6 +260,17 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
                     key: "experimental.allowSubAgents",
                     expected: "boolean",
                     actual: typeof experimental.allowSubAgents,
+                })
+            }
+
+            if (
+                experimental.customPrompts !== undefined &&
+                typeof experimental.customPrompts !== "boolean"
+            ) {
+                errors.push({
+                    key: "experimental.customPrompts",
+                    expected: "boolean",
+                    actual: typeof experimental.customPrompts,
                 })
             }
         }
@@ -619,6 +633,7 @@ const defaultConfig: PluginConfig = {
     },
     experimental: {
         allowSubAgents: false,
+        customPrompts: false,
     },
     protectedFilePatterns: [],
     compress: {
@@ -835,6 +850,7 @@ function mergeExperimental(
 
     return {
         allowSubAgents: override.allowSubAgents ?? base.allowSubAgents,
+        customPrompts: override.customPrompts ?? base.customPrompts,
     }
 }
 
