@@ -2,7 +2,11 @@ import type { CompressionBlock, SessionState, WithParts } from "../state"
 import { formatBlockRef, formatMessageIdTag, parseBoundaryId } from "../message-ids"
 import { isIgnoredUserMessage } from "../messages/utils"
 import { countAllMessageTokens } from "../strategies/utils"
-import { getFilePathsFromParameters, isProtected, isToolNameProtected } from "../protected-patterns"
+import {
+    getFilePathsFromParameters,
+    isFilePathProtected,
+    isToolNameProtected,
+} from "../protected-patterns"
 import {
     buildSubagentResultText,
     getSubAgentId,
@@ -812,7 +816,7 @@ export async function appendProtectedTools(
 
                 if (!isToolProtected && protectedFilePatterns.length > 0) {
                     const filePaths = getFilePathsFromParameters(part.tool, part.state?.input)
-                    if (isProtected(filePaths, protectedFilePatterns)) {
+                    if (isFilePathProtected(filePaths, protectedFilePatterns)) {
                         isToolProtected = true
                     }
                 }

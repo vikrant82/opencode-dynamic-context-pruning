@@ -1,7 +1,11 @@
 import { PluginConfig } from "../config"
 import { Logger } from "../logger"
 import type { SessionState, WithParts } from "../state"
-import { getFilePathsFromParameters, isProtected, isToolNameProtected } from "../protected-patterns"
+import {
+    getFilePathsFromParameters,
+    isFilePathProtected,
+    isToolNameProtected,
+} from "../protected-patterns"
 import { getTotalToolTokens } from "./utils"
 
 /**
@@ -53,7 +57,7 @@ export const deduplicate = (
         }
 
         const filePaths = getFilePathsFromParameters(metadata.tool, metadata.parameters)
-        if (isProtected(filePaths, config.protectedFilePatterns)) {
+        if (isFilePathProtected(filePaths, config.protectedFilePatterns)) {
             continue
         }
 

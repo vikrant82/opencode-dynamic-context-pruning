@@ -97,7 +97,7 @@ export function getFilePathsFromParameters(tool: string, parameters: unknown): s
     return [...new Set(paths)].filter((p) => p.length > 0)
 }
 
-export function isProtected(filePaths: string[], patterns: string[]): boolean {
+export function isFilePathProtected(filePaths: string[], patterns: string[]): boolean {
     if (!filePaths || filePaths.length === 0) return false
     if (!patterns || patterns.length === 0) return false
 
