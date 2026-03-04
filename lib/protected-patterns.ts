@@ -6,14 +6,6 @@ function escapeRegExpChar(ch: string): string {
     return /[\\.^$+{}()|\[\]]/.test(ch) ? `\\${ch}` : ch
 }
 
-/**
- * Basic glob matching with support for `**`, `*`, and `?`.
- *
- * Notes:
- * - Matching is performed against the full (normalized) string.
- * - `*` and `?` do not match `/`.
- * - `**` matches across `/`.
- */
 export function matchesGlob(inputPath: string, pattern: string): boolean {
     if (!pattern) return false
 
@@ -114,14 +106,6 @@ export function isProtected(filePaths: string[], patterns: string[]): boolean {
 
 const GLOB_CHARS = /[*?]/
 
-/**
- * Check if a tool name matches any of the given protected tool patterns.
- * Supports both exact names (e.g. "task") and glob/wildcard patterns
- * (e.g. "mcp_*", "mcp_server_*_fetch", "my_tool_?").
- *
- * For performance, exact patterns are checked via Set lookup first;
- * only patterns containing wildcard characters (`*` or `?`) use glob matching.
- */
 export function isToolNameProtected(toolName: string, patterns: string[]): boolean {
     if (!toolName || !patterns || patterns.length === 0) return false
 
