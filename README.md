@@ -135,6 +135,9 @@ DCP uses its own config file:
         "flatSchema": false,
         // Tool names whose completed outputs are appended to the compression
         "protectedTools": [],
+        // Preserve your messages during compression.
+        // Warning: large copy-pasted prompts will never be compressed away
+        "protectUserMessages": false,
     },
     // Automatic pruning strategies
     "strategies": {
