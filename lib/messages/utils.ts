@@ -14,16 +14,6 @@ const generateStableId = (prefix: string, seed: string): string => {
     return `${prefix}_${hash}`
 }
 
-const isGeminiModel = (modelID: string): boolean => {
-    const lowerModelID = modelID.toLowerCase()
-    return lowerModelID.includes("gemini")
-}
-
-export const rejectsTextParts = (modelID: string): boolean => {
-    const lowerModelID = modelID.toLowerCase()
-    return lowerModelID.includes("claude") || lowerModelID.includes("deepseek")
-}
-
 export const createSyntheticUserMessage = (
     baseMessage: WithParts,
     content: string,
@@ -73,48 +63,6 @@ export const createSyntheticTextPart = (
         messageID: userInfo.id,
         type: "text" as const,
         text: content,
-    }
-}
-
-export const createSyntheticToolPart = (
-    baseMessage: WithParts,
-    content: string,
-    modelID: string,
-    stableSeed?: string,
-) => {
-    const userInfo = baseMessage.info as UserMessage
-    const now = Date.now()
-
-    const deterministicSeed = stableSeed?.trim() || userInfo.id
-    const partId = generateStableId("prt_dcp_tool", deterministicSeed)
-    const callId = generateStableId("call_dcp_tool", deterministicSeed)
-
-    const finalContent = `<system-reminder>\nThis tool was called by the environment and is not available to the LLM.\n</system-reminder>\n${content}`
-
-    // Gemini requires a thought signature on synthetic function calls.
-    // This must live on part metadata so it maps to callProviderMetadata.
-    const toolPartMetadata = isGeminiModel(modelID)
-        ? {
-              google: { thoughtSignature: "skip_thought_signature_validator" },
-              vertex: { thoughtSignature: "skip_thought_signature_validator" },
-          }
-        : undefined
-
-    return {
-        id: partId,
-        sessionID: userInfo.sessionID,
-        messageID: userInfo.id,
-        type: "tool" as const,
-        callID: callId,
-        tool: "context_info",
-        ...(toolPartMetadata ? { metadata: toolPartMetadata } : {}),
-        state: {
-            status: "completed" as const,
-            input: {},
-            output: finalContent,
-            title: "Context Info",
-            time: { start: now, end: now },
-        } as any,
     }
 }
 

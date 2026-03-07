@@ -8,10 +8,8 @@ import { saveSessionState } from "../../state/persistence"
 import {
     appendIdToTool,
     createSyntheticTextPart,
-    createSyntheticToolPart,
     findLastToolPart,
     isIgnoredUserMessage,
-    rejectsTextParts,
 } from "../utils"
 import {
     addAnchor,
@@ -129,7 +127,7 @@ export const injectCompressNudges = (
         }
     }
 
-    applyAnchoredNudges(state, config, messages, modelId, prompts)
+    applyAnchoredNudges(state, config, messages, prompts)
 
     if (anchorsChanged) {
         void saveSessionState(state, logger)
@@ -144,9 +142,6 @@ export const injectMessageIds = (
     if (config.compress.permission === "deny") {
         return
     }
-
-    const { modelId } = getModelInfo(messages)
-    const toolModelId = modelId || ""
 
     for (const message of messages) {
         if (message.info.role === "user" && isIgnoredUserMessage(message)) {
@@ -174,10 +169,12 @@ export const injectMessageIds = (
             continue
         }
 
-        if (rejectsTextParts(toolModelId)) {
-            message.parts.push(createSyntheticToolPart(message, tag, toolModelId))
+        const syntheticPart = createSyntheticTextPart(message, tag)
+        const firstToolIndex = message.parts.findIndex((p) => p.type === "tool")
+        if (firstToolIndex === -1) {
+            message.parts.push(syntheticPart)
         } else {
-            message.parts.push(createSyntheticTextPart(message, tag))
+            message.parts.splice(firstToolIndex, 0, syntheticPart)
         }
     }
 }

@@ -2,12 +2,7 @@ import type { SessionState, WithParts } from "../../state"
 import type { PluginConfig } from "../../config"
 import type { RuntimePrompts } from "../../prompts/store"
 import type { UserMessage } from "@opencode-ai/sdk/v2"
-import {
-    createSyntheticTextPart,
-    createSyntheticToolPart,
-    isIgnoredUserMessage,
-    rejectsTextParts,
-} from "../utils"
+import { createSyntheticTextPart, isIgnoredUserMessage } from "../utils"
 import { getLastUserMessage } from "../../shared-utils"
 import { getCurrentTokenUsage } from "../../strategies/utils"
 
@@ -205,7 +200,6 @@ function appendGuidanceToInstructionXml(hintText: string, guidance: string): str
 function applyAnchoredNudge(
     anchorMessageIds: Set<string>,
     messages: WithParts[],
-    modelId: string | undefined,
     hintText: string,
 ): void {
     if (anchorMessageIds.size === 0) {
@@ -228,11 +222,12 @@ function applyAnchoredNudge(
             continue
         }
 
-        const toolModelId = modelId || ""
-        if (rejectsTextParts(toolModelId)) {
-            message.parts.push(createSyntheticToolPart(message, hintText, toolModelId))
+        const syntheticPart = createSyntheticTextPart(message, hintText)
+        const firstToolIndex = message.parts.findIndex((p) => p.type === "tool")
+        if (firstToolIndex === -1) {
+            message.parts.push(syntheticPart)
         } else {
-            message.parts.push(createSyntheticTextPart(message, hintText))
+            message.parts.splice(firstToolIndex, 0, syntheticPart)
         }
     }
 }
@@ -241,7 +236,6 @@ export function applyAnchoredNudges(
     state: SessionState,
     config: PluginConfig,
     messages: WithParts[],
-    modelId: string | undefined,
     prompts: RuntimePrompts,
 ): void {
     const compressedBlockGuidance = buildCompressedBlockGuidance(state)
@@ -251,7 +245,7 @@ export function applyAnchoredNudges(
         compressedBlockGuidance,
     )
 
-    applyAnchoredNudge(state.nudges.contextLimitAnchors, messages, modelId, contextLimitNudge)
+    applyAnchoredNudge(state.nudges.contextLimitAnchors, messages, contextLimitNudge)
 
     const turnNudgeAnchors = new Set<string>()
     const targetRole = config.compress.nudgeForce === "strong" ? "user" : "assistant"
@@ -265,11 +259,11 @@ export function applyAnchoredNudges(
         }
     }
 
-    applyAnchoredNudge(turnNudgeAnchors, messages, modelId, turnNudge)
+    applyAnchoredNudge(turnNudgeAnchors, messages, turnNudge)
 
     const iterationNudge = appendGuidanceToInstructionXml(
         prompts.iterationNudge,
         compressedBlockGuidance,
     )
-    applyAnchoredNudge(state.nudges.iterationNudgeAnchors, messages, modelId, iterationNudge)
+    applyAnchoredNudge(state.nudges.iterationNudgeAnchors, messages, iterationNudge)
 }
