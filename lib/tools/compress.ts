@@ -3,6 +3,7 @@ import type { ToolContext } from "./types"
 import { ensureSessionInitialized } from "../state"
 import {
     appendMissingBlockSummaries,
+    appendProtectedUserMessages,
     appendProtectedTools,
     wrapCompressedSummary,
     allocateBlockId,
@@ -27,6 +28,8 @@ import { saveSessionState } from "../state/persistence"
 import { sendCompressNotification } from "../ui/notification"
 import { NESTED_FORMAT_OVERLAY, FLAT_FORMAT_OVERLAY } from "../prompts/internal-overlays"
 
+// This schema looks better in the TUI (non primitive args aren't displayed), but LLMs are more likely to fail
+// the tool call
 function buildNestedSchema() {
     return {
         topic: tool.schema
@@ -50,6 +53,7 @@ function buildNestedSchema() {
     }
 }
 
+// Simpler schema for models that are not as good at tool calling reliably
 function buildFlatSchema() {
     return {
         topic: tool.schema
@@ -141,11 +145,19 @@ export function createCompressTool(ctx: ToolContext): ReturnType<typeof tool> {
                 range.endReference,
             )
 
+            const summaryWithUserMessages = appendProtectedUserMessages(
+                injected.expandedSummary,
+                range,
+                searchContext,
+                ctx.state,
+                ctx.config.compress.protectUserMessages,
+            )
+
             const summaryWithProtectedTools = await appendProtectedTools(
                 ctx.client,
                 ctx.state,
                 ctx.config.experimental.allowSubAgents,
-                injected.expandedSummary,
+                summaryWithUserMessages,
                 range,
                 searchContext,
                 ctx.config.compress.protectedTools,

@@ -225,6 +225,11 @@
                     },
                     "default": [],
                     "description": "Tool names or wildcard patterns whose completed outputs should be appended to the compression summary. Supports glob wildcards: * matches any characters, ? matches a single character (e.g., \"mcp_*\", \"my_tool_?\")"
+                },
+                "protectUserMessages": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When enabled, your messages are never lost during compression"
                 }
             }
         },

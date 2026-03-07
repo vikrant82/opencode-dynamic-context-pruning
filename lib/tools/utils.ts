@@ -810,6 +810,46 @@ function mergeWithSpacing(left: string, right: string): string {
     return `${l}\n\n${r}`
 }
 
+export function appendProtectedUserMessages(
+    summary: string,
+    range: RangeResolution,
+    searchContext: SearchContext,
+    state: SessionState,
+    enabled: boolean,
+): string {
+    if (!enabled) return summary
+
+    const userTexts: string[] = []
+
+    for (const messageId of range.messageIds) {
+        const existingCompressionEntry = state.prune.messages.byMessageId.get(messageId)
+        if (existingCompressionEntry && existingCompressionEntry.activeBlockIds.length > 0) {
+            continue
+        }
+
+        const message = searchContext.rawMessagesById.get(messageId)
+        if (!message) continue
+        if (message.info.role !== "user") continue
+        if (isIgnoredUserMessage(message)) continue
+
+        const parts = Array.isArray(message.parts) ? message.parts : []
+        for (const part of parts) {
+            if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
+                userTexts.push(part.text)
+                break
+            }
+        }
+    }
+
+    if (userTexts.length === 0) {
+        return summary
+    }
+
+    const heading = "\n\nThe following user messages were sent in this conversation verbatim:"
+    const body = userTexts.map((text) => `\n${text}`).join("")
+    return summary + heading + body
+}
+
 export async function appendProtectedTools(
     client: any,
     state: SessionState,
