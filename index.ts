@@ -19,7 +19,6 @@ import {
 import { configureClientAuth, isSecureMode } from "./lib/auth"
 
 const id = "opencode-dynamic-context-pruning"
-
 const server: Plugin = (async (ctx) => {
     const config = getConfig(ctx)
 

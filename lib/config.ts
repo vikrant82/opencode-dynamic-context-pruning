@@ -49,6 +49,11 @@ export interface TurnProtection {
     turns: number
 }
 
+export interface TuiConfig {
+    sidebar: boolean
+    debug: boolean
+}
+
 export interface ExperimentalConfig {
     allowSubAgents: boolean
     customPrompts: boolean
@@ -62,6 +67,7 @@ export interface PluginConfig {
     commands: Commands
     manualMode: ManualModeConfig
     turnProtection: TurnProtection
+    tui: TuiConfig
     experimental: ExperimentalConfig
     protectedFilePatterns: string[]
     compress: CompressConfig
@@ -98,6 +104,9 @@ export const VALID_CONFIG_KEYS = new Set([
     "turnProtection",
     "turnProtection.enabled",
     "turnProtection.turns",
+    "tui",
+    "tui.sidebar",
+    "tui.debug",
     "experimental",
     "experimental.allowSubAgents",
     "experimental.customPrompts",
@@ -159,6 +168,13 @@ interface ValidationError {
     key: string
     expected: string
     actual: string
+}
+
+type ConfigWarningNotifier = (title: string, message: string) => void
+
+interface ConfigWarningCallbacks {
+    onParseWarning?: (title: string, message: string) => void
+    onConfigWarning?: (configPath: string, data: Record<string, any>, isProject: boolean) => void
 }
 
 export function validateConfigTypes(config: Record<string, any>): ValidationError[] {
@@ -273,6 +289,32 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
                     key: "experimental.customPrompts",
                     expected: "boolean",
                     actual: typeof experimental.customPrompts,
+                })
+            }
+        }
+    }
+
+    const tui = config.tui
+    if (tui !== undefined) {
+        if (typeof tui !== "object" || tui === null || Array.isArray(tui)) {
+            errors.push({
+                key: "tui",
+                expected: "object",
+                actual: typeof tui,
+            })
+        } else {
+            if (tui.sidebar !== undefined && typeof tui.sidebar !== "boolean") {
+                errors.push({
+                    key: "tui.sidebar",
+                    expected: "boolean",
+                    actual: typeof tui.sidebar,
+                })
+            }
+            if (tui.debug !== undefined && typeof tui.debug !== "boolean") {
+                errors.push({
+                    key: "tui.debug",
+                    expected: "boolean",
+                    actual: typeof tui.debug,
                 })
             }
         }
@@ -592,8 +634,21 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
     return errors
 }
 
+function scheduleConfigWarning(
+    notify: ConfigWarningNotifier | undefined,
+    title: string,
+    message: string,
+): void {
+    setTimeout(() => {
+        if (!notify) return
+        try {
+            notify(title, message)
+        } catch {}
+    }, 7000)
+}
+
 function showConfigWarnings(
-    ctx: PluginInput,
+    notify: ConfigWarningNotifier | undefined,
     configPath: string,
     configData: Record<string, any>,
     isProject: boolean,
@@ -623,18 +678,11 @@ function showConfigWarnings(
         }
     }
 
-    setTimeout(() => {
-        try {
-            ctx.client.tui.showToast({
-                body: {
-                    title: `DCP: ${configType} warning`,
-                    message: `${configPath}\n${messages.join("\n")}`,
-                    variant: "warning",
-                    duration: 7000,
-                },
-            })
-        } catch {}
-    }, 7000)
+    scheduleConfigWarning(
+        notify,
+        `DCP: ${configType} warning`,
+        `${configPath}\n${messages.join("\n")}`,
+    )
 }
 
 const defaultConfig: PluginConfig = {
@@ -649,6 +697,10 @@ const defaultConfig: PluginConfig = {
     manualMode: {
         enabled: false,
         automaticStrategies: true,
+    },
+    tui: {
+        sidebar: true,
+        debug: false,
     },
     turnProtection: {
         enabled: false,
@@ -707,7 +759,7 @@ function findOpencodeDir(startDir: string): string | null {
     return null
 }
 
-function getConfigPaths(ctx?: PluginInput): {
+function getConfigPaths(directory?: string): {
     global: string | null
     configDir: string | null
     project: string | null
@@ -731,8 +783,8 @@ function getConfigPaths(ctx?: PluginInput): {
     }
 
     let project: string | null = null
-    if (ctx?.directory) {
-        const opencodeDir = findOpencodeDir(ctx.directory)
+    if (directory) {
+        const opencodeDir = findOpencodeDir(directory)
         if (opencodeDir) {
             const projectJsonc = join(opencodeDir, "dcp.jsonc")
             const projectJson = join(opencodeDir, "dcp.json")
@@ -865,6 +917,18 @@ function mergeManualMode(
     }
 }
 
+function mergeTui(
+    base: PluginConfig["tui"],
+    override?: Partial<PluginConfig["tui"]>,
+): PluginConfig["tui"] {
+    if (override === undefined) return base
+
+    return {
+        sidebar: override.sidebar ?? base.sidebar,
+        debug: override.debug ?? base.debug,
+    }
+}
+
 function mergeExperimental(
     base: PluginConfig["experimental"],
     override?: Partial<PluginConfig["experimental"]>,
@@ -888,6 +952,7 @@ function deepCloneConfig(config: PluginConfig): PluginConfig {
             enabled: config.manualMode.enabled,
             automaticStrategies: config.manualMode.automaticStrategies,
         },
+        tui: { ...config.tui },
         turnProtection: { ...config.turnProtection },
         experimental: { ...config.experimental },
         protectedFilePatterns: [...config.protectedFilePatterns],
@@ -916,6 +981,7 @@ function mergeLayer(config: PluginConfig, data: Record<string, any>): PluginConf
         debug: data.debug ?? config.debug,
         pruneNotification: data.pruneNotification ?? config.pruneNotification,
         pruneNotificationType: data.pruneNotificationType ?? config.pruneNotificationType,
+        tui: mergeTui(config.tui, data.tui as any),
         commands: mergeCommands(config.commands, data.commands as any),
         manualMode: mergeManualMode(config.manualMode, data.manualMode as any),
         turnProtection: {
@@ -931,24 +997,21 @@ function mergeLayer(config: PluginConfig, data: Record<string, any>): PluginConf
     }
 }
 
-function scheduleParseWarning(ctx: PluginInput, title: string, message: string): void {
-    setTimeout(() => {
-        try {
-            ctx.client.tui.showToast({
-                body: {
-                    title,
-                    message,
-                    variant: "warning",
-                    duration: 7000,
-                },
-            })
-        } catch {}
-    }, 7000)
+function createConfigWarningCallbacks(
+    notify?: ConfigWarningNotifier,
+): ConfigWarningCallbacks | undefined {
+    if (!notify) return undefined
+
+    return {
+        onParseWarning: (title, message) => scheduleConfigWarning(notify, title, message),
+        onConfigWarning: (configPath, data, isProject) =>
+            showConfigWarnings(notify, configPath, data, isProject),
+    }
 }
 
-export function getConfig(ctx: PluginInput): PluginConfig {
+function loadMergedConfig(directory?: string, callbacks?: ConfigWarningCallbacks): PluginConfig {
     let config = deepCloneConfig(defaultConfig)
-    const configPaths = getConfigPaths(ctx)
+    const configPaths = getConfigPaths(directory)
 
     if (!configPaths.global) {
         createDefaultConfig()
@@ -967,8 +1030,7 @@ export function getConfig(ctx: PluginInput): PluginConfig {
 
         const result = loadConfigFile(layer.path)
         if (result.parseError) {
-            scheduleParseWarning(
-                ctx,
+            callbacks?.onParseWarning?.(
                 `DCP: Invalid ${layer.name}`,
                 `${layer.path}\n${result.parseError}\nUsing previous/default values`,
             )
@@ -979,9 +1041,32 @@ export function getConfig(ctx: PluginInput): PluginConfig {
             continue
         }
 
-        showConfigWarnings(ctx, layer.path, result.data, layer.isProject)
+        callbacks?.onConfigWarning?.(layer.path, result.data, layer.isProject)
         config = mergeLayer(config, result.data)
     }
 
     return config
+}
+
+export function getConfigForDirectory(
+    directory?: string,
+    notify?: ConfigWarningNotifier,
+): PluginConfig {
+    return loadMergedConfig(directory, createConfigWarningCallbacks(notify))
+}
+
+export function getConfig(ctx: PluginInput): PluginConfig {
+    return loadMergedConfig(
+        ctx.directory,
+        createConfigWarningCallbacks((title, message) => {
+            ctx.client.tui.showToast({
+                body: {
+                    title,
+                    message,
+                    variant: "warning",
+                    duration: 7000,
+                },
+            })
+        }),
+    )
 }
