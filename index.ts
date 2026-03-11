@@ -9,6 +9,7 @@ import {
 import { Logger } from "./lib/logger"
 import { createSessionState } from "./lib/state"
 import { PromptStore } from "./lib/prompts/store"
+import tuiPlugin from "./tui/index"
 import {
     createChatMessageHandler,
     createChatMessageTransformHandler,
@@ -19,7 +20,7 @@ import {
 } from "./lib/hooks"
 import { configureClientAuth, isSecureMode } from "./lib/auth"
 
-const plugin: Plugin = (async (ctx) => {
+const server: Plugin = (async (ctx) => {
     const config = getConfig(ctx)
 
     if (!config.enabled) {
@@ -133,4 +134,7 @@ const plugin: Plugin = (async (ctx) => {
     }
 }) satisfies Plugin
 
-export default plugin
+export default {
+    server,
+    ...tuiPlugin,
+}
