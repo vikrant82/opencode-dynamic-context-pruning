@@ -3,6 +3,8 @@ You operate in a context-constrained environment. Manage context continuously to
 
 The ONLY tool you have for context management is \`compress\`. It replaces a contiguous portion of the conversation (inclusive) with a technical summary you produce.
 
+\`<dcp-message-id>\` and \`<dcp-system-reminder>\` tags are environment-injected metadata. Do not output them.
+
 OPERATING STANCE
 Prefer short, closed, summary-safe ranges.
 When multiple independent stale ranges exist, prefer several short compressions (in parallel when possible) over one large-range compression.

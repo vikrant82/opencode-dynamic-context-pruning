@@ -22,6 +22,7 @@ import {
     type CompressToolArgs,
 } from "./utils"
 import { isIgnoredUserMessage } from "../messages/utils"
+import { assignMessageRefs } from "../message-ids"
 import { getCurrentParams, getCurrentTokenUsage, countTokens } from "../strategies/utils"
 import { deduplicate, supersedeWrites, purgeErrors } from "../strategies"
 import { saveSessionState } from "../state/persistence"
@@ -111,6 +112,8 @@ export function createCompressTool(ctx: ToolContext): ReturnType<typeof tool> {
                 rawMessages,
                 ctx.config.manualMode.enabled,
             )
+
+            assignMessageRefs(ctx.state, rawMessages)
 
             deduplicate(ctx.state, ctx.logger, ctx.config, rawMessages)
             // supersedeWrites(ctx.state, ctx.logger, ctx.config, rawMessages)
