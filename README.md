@@ -106,11 +106,11 @@ Each level overrides the previous, so project settings take priority over global
         // Soft upper threshold: above this, DCP keeps injecting strong
         // compression nudges (based on nudgeFrequency), so compression is
         // much more likely. Accepts: number or "X%" of model context window.
-        "maxContextLimit": 100000,
+        "maxContextLimit": 150000,
         // Soft lower threshold for reminder nudges: below this, turn/iteration
         // reminders are off (compression less likely). At/above this, reminders
         // are on. Accepts: number or "X%" of model context window.
-        "minContextLimit": 30000,
+        "minContextLimit": 50000,
         // Optional per-model override for maxContextLimit by providerID/modelID.
         // If present, this wins over the global maxContextLimit.
         // Accepts: number or "X%".
@@ -122,7 +122,7 @@ Each level overrides the previous, so project settings take priority over global
         // Optional per-model override for minContextLimit.
         // If present, this wins over the global minContextLimit.
         // "modelMinLimits": {
-        //     "openai/gpt-5.3-codex": 30000,
+        //     "openai/gpt-5.3-codex": 50000,
         //     "anthropic/claude-sonnet-4.6": "25%"
         // },
         // How often the context-limit nudge fires (1 = every fetch, 5 = every 5th)

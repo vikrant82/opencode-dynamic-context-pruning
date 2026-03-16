@@ -664,8 +664,8 @@ const defaultConfig: PluginConfig = {
     compress: {
         permission: "allow",
         showCompression: false,
-        maxContextLimit: 100000,
-        minContextLimit: 30000,
+        maxContextLimit: 150000,
+        minContextLimit: 50000,
         nudgeFrequency: 5,
         iterationNudgeThreshold: 15,
         nudgeForce: "soft",

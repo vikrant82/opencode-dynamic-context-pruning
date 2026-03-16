@@ -183,12 +183,6 @@ function stripConditionalTag(content: string, tagName: string): string {
     return content.replace(regex, "")
 }
 
-function hasTagPairMismatch(content: string, tagName: string): boolean {
-    const openRegex = new RegExp(`<${tagName}\\b[^>]*>`, "i")
-    const closeRegex = new RegExp(`<\/${tagName}>`, "i")
-    return openRegex.test(content) !== closeRegex.test(content)
-}
-
 function unwrapDcpTagIfWrapped(content: string): string {
     const trimmed = content.trim()
 
@@ -205,7 +199,14 @@ function unwrapDcpTagIfWrapped(content: string): string {
 function normalizeReminderPromptContent(content: string): string {
     const normalized = content.trim()
 
-    if (hasTagPairMismatch(normalized, "dcp-system-reminder")) {
+    if (!normalized) {
+        return ""
+    }
+
+    const startsWrapped = /^\s*<dcp-system-reminder\b[^>]*>/i.test(normalized)
+    const endsWrapped = /<\/dcp-system-reminder>\s*$/i.test(normalized)
+
+    if (startsWrapped !== endsWrapped) {
         return ""
     }
 
