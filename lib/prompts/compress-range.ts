@@ -1,4 +1,4 @@
-export const COMPRESS = `Collapse a range in the conversation into a detailed summary.
+export const COMPRESS_RANGE = `Collapse a range in the conversation into a detailed summary.
 
 THE PHILOSOPHY OF COMPRESS
 \`compress\` transforms verbose conversation sequences into dense, high-fidelity summaries. This is not cleanup - it is crystallization. Your summary becomes the authoritative record of what transpired.

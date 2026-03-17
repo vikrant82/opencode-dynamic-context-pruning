@@ -169,7 +169,15 @@ export function addAnchor(
     return anchorMessageIds.size !== previousSize
 }
 
-export function buildCompressedBlockGuidance(state: SessionState): string {
+export function buildCompressedBlockGuidance(state: SessionState, config: PluginConfig): string {
+    if (config.compress.mode === "message") {
+        return [
+            "Compressed message context:",
+            "- Message mode is active. Compress individual raw messages using `mNNNN` IDs only.",
+            "- Do not use block placeholders or `bN` references in message mode.",
+        ].join("\n")
+    }
+
     const refs = Array.from(state.prune.messages.activeBlockIds)
         .filter((id) => Number.isInteger(id) && id > 0)
         .sort((a, b) => a - b)
@@ -238,7 +246,7 @@ export function applyAnchoredNudges(
     messages: WithParts[],
     prompts: RuntimePrompts,
 ): void {
-    const compressedBlockGuidance = buildCompressedBlockGuidance(state)
+    const compressedBlockGuidance = buildCompressedBlockGuidance(state, config)
 
     const contextLimitNudge = appendGuidanceToDcpTag(
         prompts.contextLimitNudge,

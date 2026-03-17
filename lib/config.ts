@@ -5,13 +5,15 @@ import { parse } from "jsonc-parser"
 import type { PluginInput } from "@opencode-ai/plugin"
 
 type Permission = "ask" | "allow" | "deny"
+type CompressMode = "range" | "message"
 
 export interface Deduplication {
     enabled: boolean
     protectedTools: string[]
 }
 
-export interface CompressTool {
+export interface CompressConfig {
+    mode: CompressMode
     permission: Permission
     showCompression: boolean
     maxContextLimit: number | `${number}%`
@@ -66,7 +68,7 @@ export interface PluginConfig {
     turnProtection: TurnProtection
     experimental: ExperimentalConfig
     protectedFilePatterns: string[]
-    compress: CompressTool
+    compress: CompressConfig
     strategies: {
         deduplication: Deduplication
         supersedeWrites: SupersedeWrites
@@ -74,7 +76,7 @@ export interface PluginConfig {
     }
 }
 
-type CompressOverride = Partial<CompressTool>
+type CompressOverride = Partial<CompressConfig>
 
 const DEFAULT_PROTECTED_TOOLS = [
     "task",
@@ -112,6 +114,7 @@ export const VALID_CONFIG_KEYS = new Set([
     "manualMode.enabled",
     "manualMode.automaticStrategies",
     "compress",
+    "compress.mode",
     "compress.permission",
     "compress.showCompression",
     "compress.maxContextLimit",
@@ -347,6 +350,18 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
                 actual: typeof compress,
             })
         } else {
+            if (
+                compress.mode !== undefined &&
+                compress.mode !== "range" &&
+                compress.mode !== "message"
+            ) {
+                errors.push({
+                    key: "compress.mode",
+                    expected: '"range" | "message"',
+                    actual: JSON.stringify(compress.mode),
+                })
+            }
+
             if (
                 compress.nudgeFrequency !== undefined &&
                 typeof compress.nudgeFrequency !== "number"
@@ -662,6 +677,7 @@ const defaultConfig: PluginConfig = {
     },
     protectedFilePatterns: [],
     compress: {
+        mode: "range",
         permission: "allow",
         showCompression: false,
         maxContextLimit: 150000,
@@ -830,6 +846,7 @@ function mergeCompress(
     }
 
     return {
+        mode: override.mode ?? base.mode,
         permission: override.permission ?? base.permission,
         showCompression: override.showCompression ?? base.showCompression,
         maxContextLimit: override.maxContextLimit ?? base.maxContextLimit,

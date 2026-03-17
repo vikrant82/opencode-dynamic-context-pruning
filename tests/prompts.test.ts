@@ -101,3 +101,34 @@ test("system prompt overrides handle reminder tags safely", async (t) => {
         }
     })
 })
+
+test("prompt store exposes bundled message-mode compress prompt", () => {
+    const fixture = createPromptStoreFixture()
+
+    try {
+        const runtimePrompts = fixture.store.getRuntimePrompts()
+
+        assert.match(runtimePrompts.compressMessage, /selected individual messages/i)
+        assert.match(
+            runtimePrompts.compressMessage,
+            /Only use raw message IDs of the form `mNNNN`\./,
+        )
+        assert.match(runtimePrompts.compressMessage, /Do not use compressed block placeholders/i)
+    } finally {
+        fixture.cleanup()
+    }
+})
+
+test("prompt store exposes bundled range-mode compress prompt", () => {
+    const fixture = createPromptStoreFixture()
+
+    try {
+        const runtimePrompts = fixture.store.getRuntimePrompts()
+
+        assert.match(runtimePrompts.compressRange, /Collapse a range in the conversation/i)
+        assert.match(runtimePrompts.compressRange, /COMPRESSED BLOCK PLACEHOLDERS/)
+        assert.match(runtimePrompts.compressRange, /PARALLEL COMPRESS EXECUTION/)
+    } finally {
+        fixture.cleanup()
+    }
+})

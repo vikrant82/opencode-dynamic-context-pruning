@@ -3,7 +3,7 @@ import test from "node:test"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { mkdirSync } from "node:fs"
-import { createCompressTool } from "../lib/tools/compress"
+import { createCompressRangeTool } from "../lib/tools/compress-range"
 import { createSessionState, type WithParts } from "../lib/state"
 import type { PluginConfig } from "../lib/config"
 import { Logger } from "../lib/logger"
@@ -41,6 +41,7 @@ function buildConfig(): PluginConfig {
         },
         protectedFilePatterns: [],
         compress: {
+            mode: "range",
             permission: "allow",
             showCompression: false,
             maxContextLimit: 150000,
@@ -126,7 +127,7 @@ function buildMessages(sessionID: string): WithParts[] {
     ]
 }
 
-test("compress rebuilds subagent message refs after session state was reset", async () => {
+test("compress range rebuilds subagent message refs after session state was reset", async () => {
     const sessionID = `ses_subagent_compress_${Date.now()}`
     const rawMessages = buildMessages(sessionID)
     const state = createSessionState()
@@ -136,7 +137,7 @@ test("compress rebuilds subagent message refs after session state was reset", as
     state.messageIds.nextRef = 2
 
     const logger = new Logger(false)
-    const tool = createCompressTool({
+    const tool = createCompressRangeTool({
         client: {
             session: {
                 messages: async () => ({ data: rawMessages }),

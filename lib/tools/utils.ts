@@ -15,7 +15,7 @@ import {
 
 const BLOCK_PLACEHOLDER_REGEX = /\(b(\d+)\)|\{block_(\d+)\}/gi
 
-export interface CompressToolArgs {
+export interface CompressRangeToolArgs {
     topic: string
     content: {
         startId: string
@@ -24,16 +24,40 @@ export interface CompressToolArgs {
     }
 }
 
-export interface FlatCompressToolArgs {
+export interface FlatCompressRangeToolArgs {
     topic: string
     startId: string
     endId: string
     summary: string
 }
 
-export function normalizeCompressArgs(args: Record<string, unknown>): CompressToolArgs {
+export interface CompressMessageEntry {
+    messageId: string
+    topic: string
+    summary: string
+}
+
+export interface CompressMessageToolArgs {
+    topic: string
+    content: CompressMessageEntry[]
+}
+
+export interface ResolvedMessageCompression {
+    entry: CompressMessageEntry
+    range: RangeResolution
+    anchorMessageId: string
+}
+
+export interface ResolvedMessageCompressionsResult {
+    plans: ResolvedMessageCompression[]
+    skippedIssues: string[]
+}
+
+class SoftMessageCompressionIssue extends Error {}
+
+export function normalizeCompressRangeArgs(args: Record<string, unknown>): CompressRangeToolArgs {
     if ("content" in args && typeof args.content === "object" && args.content !== null) {
-        return args as unknown as CompressToolArgs
+        return args as unknown as CompressRangeToolArgs
     }
 
     return {
@@ -44,6 +68,12 @@ export function normalizeCompressArgs(args: Record<string, unknown>): CompressTo
             summary: args.summary as string,
         },
     }
+}
+
+export function normalizeCompressMessageArgs(
+    args: Record<string, unknown>,
+): CompressMessageToolArgs {
+    return args as unknown as CompressMessageToolArgs
 }
 
 export interface BoundaryReference {
@@ -102,7 +132,7 @@ export function formatBlockPlaceholder(blockId: number): string {
     return `(b${blockId})`
 }
 
-export function validateCompressArgs(args: CompressToolArgs): void {
+export function validateCompressRangeArgs(args: CompressRangeToolArgs): void {
     if (typeof args.topic !== "string" || args.topic.trim().length === 0) {
         throw new Error("topic is required and must be a non-empty string")
     }
@@ -118,6 +148,58 @@ export function validateCompressArgs(args: CompressToolArgs): void {
     if (typeof args.content?.summary !== "string" || args.content.summary.trim().length === 0) {
         throw new Error("content.summary is required and must be a non-empty string")
     }
+}
+
+export function validateCompressMessageArgs(args: CompressMessageToolArgs): void {
+    if (typeof args.topic !== "string" || args.topic.trim().length === 0) {
+        throw new Error("topic is required and must be a non-empty string")
+    }
+
+    if (!Array.isArray(args.content) || args.content.length === 0) {
+        throw new Error("content is required and must be a non-empty array")
+    }
+
+    for (let index = 0; index < args.content.length; index++) {
+        const entry = args.content[index]
+        const prefix = `content[${index}]`
+
+        if (typeof entry?.messageId !== "string" || entry.messageId.trim().length === 0) {
+            throw new Error(`${prefix}.messageId is required and must be a non-empty string`)
+        }
+
+        if (typeof entry?.topic !== "string" || entry.topic.trim().length === 0) {
+            throw new Error(`${prefix}.topic is required and must be a non-empty string`)
+        }
+
+        if (typeof entry?.summary !== "string" || entry.summary.trim().length === 0) {
+            throw new Error(`${prefix}.summary is required and must be a non-empty string`)
+        }
+    }
+}
+
+export function formatCompressMessageResult(
+    processedCount: number,
+    skippedIssues: string[],
+): string {
+    const messageNoun = processedCount === 1 ? "message" : "messages"
+    const processedText =
+        processedCount > 0
+            ? `Compressed ${processedCount} ${messageNoun} into ${COMPRESSED_BLOCK_HEADER}.`
+            : "Compressed 0 messages."
+
+    if (skippedIssues.length === 0) {
+        return processedText
+    }
+
+    const issueNoun = skippedIssues.length === 1 ? "issue" : "issues"
+    const issueLines = skippedIssues.map((issue) => `- ${issue}`).join("\n")
+    return `${processedText}\nSkipped ${skippedIssues.length} ${issueNoun}:\n${issueLines}`
+}
+
+export function formatCompressMessageIssues(skippedIssues: string[]): string {
+    const issueNoun = skippedIssues.length === 1 ? "issue" : "issues"
+    const issueLines = skippedIssues.map((issue) => `- ${issue}`).join("\n")
+    return `Unable to compress any messages. Found ${skippedIssues.length} ${issueNoun}:\n${issueLines}`
 }
 
 export async function fetchSessionMessages(client: any, sessionId: string): Promise<WithParts[]> {
@@ -376,6 +458,111 @@ export function resolveAnchorMessageId(startReference: BoundaryReference): strin
         throw new Error("Failed to map boundary matches back to raw messages")
     }
     return startReference.messageId
+}
+
+function resolveMessageCompression(
+    entry: CompressMessageEntry,
+    searchContext: SearchContext,
+    state: SessionState,
+): ResolvedMessageCompression {
+    const parsed = parseBoundaryId(entry.messageId)
+
+    if (!parsed) {
+        throw new Error(
+            `messageId ${entry.messageId} is invalid. Use an injected raw message ID of the form mNNNN.`,
+        )
+    }
+
+    if (parsed.kind === "compressed-block") {
+        throw new SoftMessageCompressionIssue(
+            `messageId ${entry.messageId} is invalid in message mode. Block IDs like bN are not allowed; use an mNNNN message ID instead.`,
+        )
+    }
+
+    const lookup = buildBoundaryReferenceLookup(searchContext, state)
+    if (!lookup.has(parsed.ref)) {
+        throw new SoftMessageCompressionIssue(
+            `messageId ${parsed.ref} is not available in the current conversation context. Choose an injected mNNNN ID visible in context.`,
+        )
+    }
+
+    const { startReference, endReference } = resolveBoundaryIds(
+        searchContext,
+        state,
+        parsed.ref,
+        parsed.ref,
+    )
+    const range = resolveRange(searchContext, startReference, endReference)
+    const rawMessageId = range.messageIds[0]
+
+    if (!rawMessageId) {
+        throw new Error(`messageId ${parsed.ref} could not be resolved to a raw message.`)
+    }
+
+    const message = searchContext.rawMessagesById.get(rawMessageId)
+    if (!message) {
+        throw new Error(`messageId ${parsed.ref} is not available in the current conversation.`)
+    }
+
+    const pruneEntry = state.prune.messages.byMessageId.get(rawMessageId)
+    if (pruneEntry && pruneEntry.activeBlockIds.length > 0) {
+        throw new Error(`messageId ${parsed.ref} is already part of an active compression.`)
+    }
+
+    return {
+        entry: {
+            messageId: parsed.ref,
+            topic: entry.topic,
+            summary: entry.summary,
+        },
+        range,
+        anchorMessageId: resolveAnchorMessageId(startReference),
+    }
+}
+
+export function resolveMessageCompressions(
+    args: CompressMessageToolArgs,
+    searchContext: SearchContext,
+    state: SessionState,
+): ResolvedMessageCompressionsResult {
+    const issues: string[] = []
+    const plans: ResolvedMessageCompression[] = []
+    const seenMessageIds = new Set<string>()
+
+    for (const entry of args.content) {
+        const normalizedMessageId = entry.messageId.trim()
+        if (seenMessageIds.has(normalizedMessageId)) {
+            issues.push(
+                `messageId ${normalizedMessageId} was selected more than once in this batch.`,
+            )
+            continue
+        }
+
+        try {
+            const plan = resolveMessageCompression(
+                {
+                    ...entry,
+                    messageId: normalizedMessageId,
+                },
+                searchContext,
+                state,
+            )
+            seenMessageIds.add(plan.entry.messageId)
+            plans.push(plan)
+        } catch (error: any) {
+            if (error instanceof SoftMessageCompressionIssue) {
+                issues.push(error.message)
+                continue
+            }
+
+            throw error
+        }
+    }
+
+    return {
+        plans,
+        skippedIssues: issues,
+    }
 }
 
 export function parseBlockPlaceholders(summary: string): ParsedBlockPlaceholder[] {
