@@ -99,6 +99,9 @@ Each level overrides the previous, so project settings take priority over global
     "protectedFilePatterns": [],
     // Unified context compression tool and behavior settings
     "compress": {
+        // Compression mode: "range" (compress spans into block summaries)
+        // or "message" (compress individual raw messages)
+        "mode": "range",
         // Permission mode: "allow" (no prompt), "ask" (prompt), "deny" (tool not registered)
         "permission": "allow",
         // Show compression content in a chat notification
@@ -204,11 +207,11 @@ To reset an override, delete the matching file from your overrides directory.
 ### Protected Tools
 
 By default, these tools are always protected from pruning:
-`task`, `skill`, `todowrite`, `todoread`, `compress`, `batch`, `plan_enter`, `plan_exit`
+`task`, `skill`, `todowrite`, `todoread`, `compress`, `batch`, `plan_enter`, `plan_exit`, `write`, `edit`
 
 The `protectedTools` arrays in `commands` and `strategies` add to this default list.
 
-For the `compress` tool, `compress.protectedTools` ensures specific tool outputs are appended to the compressed summary. It defaults to an empty array `[]` but always inherently protects `task`, `skill`, `todowrite`, and `todoread`.
+For the `compress` tool, `compress.protectedTools` ensures specific tool outputs are appended to the compressed summary. By default it includes `task`, `skill`, `todowrite`, and `todoread`.
 
 ## Impact on Prompt Caching
 

@@ -128,6 +128,12 @@
             "description": "Configuration for the unified compress tool",
             "additionalProperties": false,
             "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["range", "message"],
+                    "default": "range",
+                    "description": "Compression mode. 'range' compresses spans into block summaries, 'message' compresses individual raw messages."
+                },
                 "permission": {
                     "type": "string",
                     "enum": ["ask", "allow", "deny"],
@@ -231,6 +237,19 @@
                     "default": false,
                     "description": "When enabled, your messages are never lost during compression"
                 }
+            },
+            "default": {
+                "mode": "range",
+                "permission": "allow",
+                "showCompression": false,
+                "maxContextLimit": 150000,
+                "minContextLimit": 50000,
+                "nudgeFrequency": 5,
+                "iterationNudgeThreshold": 15,
+                "nudgeForce": "soft",
+                "flatSchema": false,
+                "protectedTools": [],
+                "protectUserMessages": false
             }
         },
         "strategies": {
