@@ -69,7 +69,7 @@
                 "automaticStrategies": {
                     "type": "boolean",
                     "default": true,
-                    "description": "When manual mode is enabled, keep automatic deduplication/supersede/purge strategies running"
+                    "description": "When manual mode is enabled, keep automatic deduplication/purge strategies running"
                 }
             },
             "default": {
@@ -219,11 +219,6 @@
                     "default": "soft",
                     "description": "Controls how likely compression is after user messages. 'strong' is more likely, 'soft' is less likely."
                 },
-                "flatSchema": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "When true, the compress tool schema uses 4 flat string parameters (topic, startId, endId, summary) instead of the nested content object. This simplifies tool calls but changes TUI display."
-                },
                 "protectedTools": {
                     "type": "array",
                     "items": {
@@ -247,7 +242,6 @@
                 "nudgeFrequency": 5,
                 "iterationNudgeThreshold": 15,
                 "nudgeForce": "soft",
-                "flatSchema": false,
                 "protectedTools": [],
                 "protectUserMessages": false
             }
@@ -274,18 +268,6 @@
                             },
                             "default": [],
                             "description": "Tool names or wildcard patterns excluded from deduplication. Supports glob wildcards: * matches any characters, ? matches a single character (e.g., \"mcp_*\", \"my_tool_?\")"
-                        }
-                    }
-                },
-                "supersedeWrites": {
-                    "type": "object",
-                    "description": "Replace older write/edit outputs when new ones target the same file",
-                    "additionalProperties": false,
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean",
-                            "default": true,
-                            "description": "Enable supersede writes strategy"
                         }
                     }
                 },

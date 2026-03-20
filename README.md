@@ -136,8 +136,6 @@ Each level overrides the previous, so project settings take priority over global
         // Controls how likely compression is after user messages
         // ("strong" = more likely, "soft" = less likely)
         "nudgeForce": "soft",
-        // Flat tool schema: improves tool call reliability but uglier in the TUI
-        "flatSchema": false,
         // Tool names whose completed outputs are appended to the compression
         "protectedTools": [],
         // Preserve your messages during compression.
@@ -151,10 +149,6 @@ Each level overrides the previous, so project settings take priority over global
             "enabled": true,
             // Additional tools to protect from pruning
             "protectedTools": [],
-        },
-        // Prune write tool inputs when the file has been subsequently read
-        "supersedeWrites": {
-            "enabled": true,
         },
         // Prune tool inputs for errored tools after X turns
         "purgeErrors": {
