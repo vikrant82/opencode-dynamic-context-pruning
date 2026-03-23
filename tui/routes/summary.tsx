@@ -100,16 +100,19 @@ function CollapsibleSectionRow(props: { section: CollapsibleSection; palette: Dc
 }
 
 function SummaryScreen(props: { api: TuiApi }) {
-    const params = createMemo(() => (props.api.route.current.params ?? {}) as SummaryRouteParams)
+    const params = createMemo(() => {
+        const current = props.api.route.current
+        return ("params" in current ? current.params : {}) as SummaryRouteParams
+    })
     const palette = createMemo(() => getPalette(props.api.theme.current as Record<string, unknown>))
     const parsed = createMemo(() => parseSummary(params().summary || ""))
 
-    const keys = props.api.keybind?.create({ close: "escape" })
+    const keys = props.api.keybind.create({ close: "escape" })
 
     useKeyboard((evt: any) => {
         if (props.api.route.current.name !== NAMES.routes.summary) return
-        if (props.api.ui?.dialog?.open) return
-        const matched = keys ? keys.match("close", evt) : evt.name === "escape"
+        if (props.api.ui.dialog.open) return
+        const matched = keys.match("close", evt)
         if (!matched) return
         evt.preventDefault()
         evt.stopPropagation()

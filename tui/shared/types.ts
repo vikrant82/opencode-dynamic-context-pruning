@@ -1,10 +1,11 @@
-import type { TuiPluginInput } from "@opencode-ai/plugin/tui"
+import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type {
     MessageStatus as DcpMessageStatus,
     TokenBreakdown as DcpContextBreakdown,
 } from "../../lib/analysis/tokens"
 
-export type DcpTuiClient = TuiPluginInput["client"]
+export type DcpTuiApi = TuiPluginApi
+export type DcpTuiClient = DcpTuiApi["client"]
 
 export type { DcpMessageStatus }
 

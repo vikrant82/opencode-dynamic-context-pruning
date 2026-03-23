@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js"
-import type { TuiApi, TuiPluginInput } from "@opencode-ai/plugin/tui"
+import type { TuiSlotPlugin } from "@opencode-ai/plugin/tui"
 import { Logger } from "../../lib/logger"
 import {
     createPlaceholderContextSnapshot,
@@ -10,7 +10,7 @@ import {
 } from "../data/context"
 import { getPalette, toneColor, type DcpColor, type DcpPalette } from "../shared/theme"
 import { LABEL, type DcpRouteNames } from "../shared/names"
-import type { DcpActiveBlockInfo, DcpMessageStatus, DcpTuiClient } from "../shared/types"
+import type { DcpActiveBlockInfo, DcpMessageStatus, DcpTuiApi } from "../shared/types"
 
 const SINGLE_BORDER = { type: "single" } as any
 const DIM_TEXT = { dim: true } as any
@@ -114,10 +114,7 @@ const SidebarContextBar = (props: {
 }
 
 const SidebarContext = (props: {
-    api: TuiApi
-    client: DcpTuiClient
-    event: TuiPluginInput["event"]
-    renderer: TuiPluginInput["renderer"]
+    api: DcpTuiApi
     names: DcpRouteNames
     palette: DcpPalette
     sessionID: () => string
@@ -137,7 +134,7 @@ const SidebarContext = (props: {
         renderTimeout = setTimeout(() => {
             renderTimeout = undefined
             try {
-                props.renderer.requestRender()
+                props.api.renderer.requestRender()
             } catch (error) {
                 props.logger.warn("Failed to request TUI render", {
                     error: error instanceof Error ? error.message : String(error),
@@ -180,7 +177,7 @@ const SidebarContext = (props: {
         const currentRequest = ++requestVersion
 
         try {
-            const value = await loadContextSnapshotCached(props.client, props.logger, sessionID)
+            const value = await loadContextSnapshotCached(props.api.client, props.logger, sessionID)
             if (currentRequest !== requestVersion || props.sessionID() !== sessionID) {
                 return
             }
@@ -230,43 +227,43 @@ const SidebarContext = (props: {
                 }
 
                 const unsubs = [
-                    props.event.on("message.updated", (event) => {
+                    props.api.event.on("message.updated", (event) => {
                         if (event.properties.info.sessionID !== sessionID) return
                         scheduleRefresh()
                     }),
-                    props.event.on("message.removed", (event) => {
+                    props.api.event.on("message.removed", (event) => {
                         if (event.properties.sessionID !== sessionID) return
                         scheduleRefresh()
                     }),
-                    props.event.on("message.part.updated", (event) => {
+                    props.api.event.on("message.part.updated", (event) => {
                         if (event.properties.part.sessionID !== sessionID) return
                         scheduleRefresh()
                     }),
-                    props.event.on("message.part.delta", (event) => {
+                    props.api.event.on("message.part.delta", (event) => {
                         if (event.properties.sessionID !== sessionID) return
                         scheduleRefresh()
                     }),
-                    props.event.on("message.part.removed", (event) => {
+                    props.api.event.on("message.part.removed", (event) => {
                         if (event.properties.sessionID !== sessionID) return
                         scheduleRefresh()
                     }),
-                    props.event.on("session.updated", (event) => {
+                    props.api.event.on("session.updated", (event) => {
                         if (event.properties.info.id !== sessionID) return
                         scheduleRefresh()
                     }),
-                    props.event.on("session.deleted", (event) => {
+                    props.api.event.on("session.deleted", (event) => {
                         if (event.properties.info.id !== sessionID) return
                         scheduleRefresh()
                     }),
-                    props.event.on("session.diff", (event) => {
+                    props.api.event.on("session.diff", (event) => {
                         if (event.properties.sessionID !== sessionID) return
                         scheduleRefresh()
                     }),
-                    props.event.on("session.error", (event) => {
+                    props.api.event.on("session.error", (event) => {
                         if (event.properties.sessionID !== sessionID) return
                         scheduleRefresh()
                     }),
-                    props.event.on("session.status", (event) => {
+                    props.api.event.on("session.status", (event) => {
                         if (event.properties.sessionID !== sessionID) return
                         scheduleRefresh()
                     }),
@@ -471,13 +468,10 @@ const SidebarContext = (props: {
 }
 
 export const createSidebarTopSlot = (
-    api: TuiApi,
-    client: DcpTuiClient,
-    event: TuiPluginInput["event"],
-    renderer: TuiPluginInput["renderer"],
+    api: DcpTuiApi,
     names: DcpRouteNames,
     logger: Logger,
-) => ({
+): TuiSlotPlugin => ({
     id: names.slot,
     slots: {
         sidebar_top(
@@ -490,9 +484,6 @@ export const createSidebarTopSlot = (
             return (
                 <SidebarContext
                     api={api}
-                    client={client}
-                    event={event}
-                    renderer={renderer}
                     names={names}
                     palette={palette()}
                     sessionID={() => value.session_id}
