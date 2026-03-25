@@ -6,16 +6,18 @@ import {
     injectBlockPlaceholders,
     parseBlockPlaceholders,
     validateSummaryPlaceholders,
-    wrapCompressedSummary,
-    type BoundaryReference,
-} from "../lib/tools/utils"
+} from "../lib/compress/range-utils"
+import { wrapCompressedSummary } from "../lib/compress/state"
+import type { BoundaryReference } from "../lib/compress/types"
 
 function createBlock(blockId: number, body: string): CompressionBlock {
     return {
         blockId,
+        runId: blockId,
         active: true,
         deactivatedByUser: false,
         compressedTokens: 0,
+        summaryTokens: 0,
         topic: `Block ${blockId}`,
         startId: "m0001",
         endId: "m0002",
@@ -41,7 +43,7 @@ function createMessageBoundary(messageId: string, rawIndex: number): BoundaryRef
     }
 }
 
-test("compress placeholder validation keeps valid placeholders and ignores invalid ones", () => {
+test("compress range placeholder validation keeps valid placeholders and ignores invalid ones", () => {
     const summaryByBlockId = new Map([
         [1, createBlock(1, "First compressed summary")],
         [2, createBlock(2, "Second compressed summary")],
@@ -78,7 +80,7 @@ test("compress placeholder validation keeps valid placeholders and ignores inval
     assert.deepEqual(injected.consumedBlockIds, [1])
 })
 
-test("compress continues by appending required block summaries the model omitted", () => {
+test("compress range continues by appending required block summaries the model omitted", () => {
     const summaryByBlockId = new Map([[1, createBlock(1, "Recovered compressed summary")]])
     const summary = "The model forgot to include the prior block."
     const parsed = parseBlockPlaceholders(summary)

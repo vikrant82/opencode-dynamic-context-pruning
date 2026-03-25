@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto"
+import type { PluginConfig } from "../config"
 import { isMessageCompacted } from "../shared-utils"
 import type { SessionState, WithParts } from "../state"
 import type { UserMessage } from "@opencode-ai/sdk/v2"
 
 const SUMMARY_ID_HASH_LENGTH = 16
-const DCP_MESSAGE_ID_TAG_REGEX = /<dcp-message-id>(?:m\d+|b\d+)<\/dcp-message-id>/g
-const DCP_SYSTEM_REMINDER_REGEX = /<dcp-system-reminder\b[^>]*>[\s\S]*?<\/dcp-system-reminder>/g
+const DCP_MESSAGE_ID_TAG_REGEX =
+    /<dcp-message-id(?=[\s>])[^>]*>(?:m\d+|b\d+|BLOCKED)<\/dcp-message-id>/g
+const DCP_BLOCK_ID_TAG_REGEX = /(<dcp-message-id(?=[\s>])[^>]*>)b\d+(<\/dcp-message-id>)/g
+const DCP_SYSTEM_REMINDER_REGEX =
+    /<dcp-system-reminder(?=[\s>])[^>]*>[\s\S]*?<\/dcp-system-reminder>/g
 
 const generateStableId = (prefix: string, seed: string): string => {
     const hash = createHash("sha256").update(seed).digest("hex").slice(0, SUMMARY_ID_HASH_LENGTH)
@@ -66,11 +70,47 @@ export const createSyntheticTextPart = (
 
 type MessagePart = WithParts["parts"][number]
 type ToolPart = Extract<MessagePart, { type: "tool" }>
+type TextPart = Extract<MessagePart, { type: "text" }>
 
-export const appendIdToTool = (part: ToolPart, tag: string): boolean => {
-    if (part.type !== "tool") {
+export const appendToTextPart = (part: TextPart, injection: string): boolean => {
+    if (typeof part.text !== "string") {
         return false
     }
+
+    const normalizedInjection = injection.replace(/^\n+/, "")
+    if (!normalizedInjection.trim()) {
+        return false
+    }
+    if (part.text.includes(normalizedInjection)) {
+        return true
+    }
+
+    const baseText = part.text.replace(/\n*$/, "")
+    part.text = baseText.length > 0 ? `${baseText}\n\n${normalizedInjection}` : normalizedInjection
+    return true
+}
+
+const findLastTextPart = (message: WithParts): TextPart | null => {
+    for (let i = message.parts.length - 1; i >= 0; i--) {
+        const part = message.parts[i]
+        if (part.type === "text") {
+            return part
+        }
+    }
+
+    return null
+}
+
+export const appendToLastTextPart = (message: WithParts, injection: string): boolean => {
+    const textPart = findLastTextPart(message)
+    if (!textPart) {
+        return false
+    }
+
+    return appendToTextPart(textPart, injection)
+}
+
+export const appendToToolPart = (part: ToolPart, tag: string): boolean => {
     if (part.state?.status !== "completed" || typeof part.state.output !== "string") {
         return false
     }
@@ -80,17 +120,6 @@ export const appendIdToTool = (part: ToolPart, tag: string): boolean => {
 
     part.state.output = `${part.state.output}${tag}`
     return true
-}
-
-export const findLastToolPart = (message: WithParts): ToolPart | null => {
-    for (let i = message.parts.length - 1; i >= 0; i--) {
-        const part = message.parts[i]
-        if (part.type === "tool") {
-            return part
-        }
-    }
-
-    return null
 }
 
 export function buildToolIdList(state: SessionState, messages: WithParts[]): string[] {
@@ -113,6 +142,10 @@ export function buildToolIdList(state: SessionState, messages: WithParts[]): str
 }
 
 export const isIgnoredUserMessage = (message: WithParts): boolean => {
+    if (message.info.role !== "user") {
+        return false
+    }
+
     const parts = Array.isArray(message.parts) ? message.parts : []
     if (parts.length === 0) {
         return true
@@ -125,6 +158,19 @@ export const isIgnoredUserMessage = (message: WithParts): boolean => {
     }
 
     return true
+}
+
+export function isProtectedUserMessage(config: PluginConfig, message: WithParts): boolean {
+    return (
+        config.compress.mode === "message" &&
+        config.compress.protectUserMessages &&
+        message.info.role === "user" &&
+        !isIgnoredUserMessage(message)
+    )
+}
+
+export const replaceBlockIdsWithBlocked = (text: string): string => {
+    return text.replace(DCP_BLOCK_ID_TAG_REGEX, "$1BLOCKED$2")
 }
 
 export const stripHallucinationsFromString = (text: string): string => {

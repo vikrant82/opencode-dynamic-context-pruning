@@ -5,15 +5,18 @@ import { parse } from "jsonc-parser"
 import type { PluginInput } from "@opencode-ai/plugin"
 
 type Permission = "ask" | "allow" | "deny"
+type CompressMode = "range" | "message"
 
 export interface Deduplication {
     enabled: boolean
     protectedTools: string[]
 }
 
-export interface CompressTool {
+export interface CompressConfig {
+    mode: CompressMode
     permission: Permission
     showCompression: boolean
+    summaryBuffer: boolean
     maxContextLimit: number | `${number}%`
     minContextLimit: number | `${number}%`
     modelMaxLimits?: Record<string, number | `${number}%`>
@@ -21,7 +24,6 @@ export interface CompressTool {
     nudgeFrequency: number
     iterationNudgeThreshold: number
     nudgeForce: "strong" | "soft"
-    flatSchema: boolean
     protectedTools: string[]
     protectUserMessages: boolean
 }
@@ -34,10 +36,6 @@ export interface Commands {
 export interface ManualModeConfig {
     enabled: boolean
     automaticStrategies: boolean
-}
-
-export interface SupersedeWrites {
-    enabled: boolean
 }
 
 export interface PurgeErrors {
@@ -66,15 +64,14 @@ export interface PluginConfig {
     turnProtection: TurnProtection
     experimental: ExperimentalConfig
     protectedFilePatterns: string[]
-    compress: CompressTool
+    compress: CompressConfig
     strategies: {
         deduplication: Deduplication
-        supersedeWrites: SupersedeWrites
         purgeErrors: PurgeErrors
     }
 }
 
-type CompressOverride = Partial<CompressTool>
+type CompressOverride = Partial<CompressConfig>
 
 const DEFAULT_PROTECTED_TOOLS = [
     "task",
@@ -112,8 +109,10 @@ export const VALID_CONFIG_KEYS = new Set([
     "manualMode.enabled",
     "manualMode.automaticStrategies",
     "compress",
+    "compress.mode",
     "compress.permission",
     "compress.showCompression",
+    "compress.summaryBuffer",
     "compress.maxContextLimit",
     "compress.minContextLimit",
     "compress.modelMaxLimits",
@@ -121,15 +120,12 @@ export const VALID_CONFIG_KEYS = new Set([
     "compress.nudgeFrequency",
     "compress.iterationNudgeThreshold",
     "compress.nudgeForce",
-    "compress.flatSchema",
     "compress.protectedTools",
     "compress.protectUserMessages",
     "strategies",
     "strategies.deduplication",
     "strategies.deduplication.enabled",
     "strategies.deduplication.protectedTools",
-    "strategies.supersedeWrites",
-    "strategies.supersedeWrites.enabled",
     "strategies.purgeErrors",
     "strategies.purgeErrors.enabled",
     "strategies.purgeErrors.turns",
@@ -348,6 +344,29 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
             })
         } else {
             if (
+                compress.mode !== undefined &&
+                compress.mode !== "range" &&
+                compress.mode !== "message"
+            ) {
+                errors.push({
+                    key: "compress.mode",
+                    expected: '"range" | "message"',
+                    actual: JSON.stringify(compress.mode),
+                })
+            }
+
+            if (
+                compress.summaryBuffer !== undefined &&
+                typeof compress.summaryBuffer !== "boolean"
+            ) {
+                errors.push({
+                    key: "compress.summaryBuffer",
+                    expected: "boolean",
+                    actual: typeof compress.summaryBuffer,
+                })
+            }
+
+            if (
                 compress.nudgeFrequency !== undefined &&
                 typeof compress.nudgeFrequency !== "number"
             ) {
@@ -386,14 +405,6 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
                     key: "compress.nudgeForce",
                     expected: '"strong" | "soft"',
                     actual: JSON.stringify(compress.nudgeForce),
-                })
-            }
-
-            if (compress.flatSchema !== undefined && typeof compress.flatSchema !== "boolean") {
-                errors.push({
-                    key: "compress.flatSchema",
-                    expected: "boolean",
-                    actual: typeof compress.flatSchema,
                 })
             }
 
@@ -532,19 +543,6 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
             })
         }
 
-        if (strategies.supersedeWrites) {
-            if (
-                strategies.supersedeWrites.enabled !== undefined &&
-                typeof strategies.supersedeWrites.enabled !== "boolean"
-            ) {
-                errors.push({
-                    key: "strategies.supersedeWrites.enabled",
-                    expected: "boolean",
-                    actual: typeof strategies.supersedeWrites.enabled,
-                })
-            }
-        }
-
         if (strategies.purgeErrors) {
             if (
                 strategies.purgeErrors.enabled !== undefined &&
@@ -662,14 +660,15 @@ const defaultConfig: PluginConfig = {
     },
     protectedFilePatterns: [],
     compress: {
+        mode: "range",
         permission: "allow",
         showCompression: false,
-        maxContextLimit: 150000,
+        summaryBuffer: true,
+        maxContextLimit: 100000,
         minContextLimit: 50000,
         nudgeFrequency: 5,
         iterationNudgeThreshold: 15,
         nudgeForce: "soft",
-        flatSchema: false,
         protectedTools: [...COMPRESS_DEFAULT_PROTECTED_TOOLS],
         protectUserMessages: false,
     },
@@ -677,9 +676,6 @@ const defaultConfig: PluginConfig = {
         deduplication: {
             enabled: true,
             protectedTools: [],
-        },
-        supersedeWrites: {
-            enabled: true,
         },
         purgeErrors: {
             enabled: true,
@@ -805,9 +801,6 @@ function mergeStrategies(
                 ]),
             ],
         },
-        supersedeWrites: {
-            enabled: override.supersedeWrites?.enabled ?? base.supersedeWrites.enabled,
-        },
         purgeErrors: {
             enabled: override.purgeErrors?.enabled ?? base.purgeErrors.enabled,
             turns: override.purgeErrors?.turns ?? base.purgeErrors.turns,
@@ -830,8 +823,10 @@ function mergeCompress(
     }
 
     return {
+        mode: override.mode ?? base.mode,
         permission: override.permission ?? base.permission,
         showCompression: override.showCompression ?? base.showCompression,
+        summaryBuffer: override.summaryBuffer ?? base.summaryBuffer,
         maxContextLimit: override.maxContextLimit ?? base.maxContextLimit,
         minContextLimit: override.minContextLimit ?? base.minContextLimit,
         modelMaxLimits: override.modelMaxLimits ?? base.modelMaxLimits,
@@ -839,7 +834,6 @@ function mergeCompress(
         nudgeFrequency: override.nudgeFrequency ?? base.nudgeFrequency,
         iterationNudgeThreshold: override.iterationNudgeThreshold ?? base.iterationNudgeThreshold,
         nudgeForce: override.nudgeForce ?? base.nudgeForce,
-        flatSchema: override.flatSchema ?? base.flatSchema,
         protectedTools: [...new Set([...base.protectedTools, ...(override.protectedTools ?? [])])],
         protectUserMessages: override.protectUserMessages ?? base.protectUserMessages,
     }
@@ -908,7 +902,6 @@ function deepCloneConfig(config: PluginConfig): PluginConfig {
                 ...config.strategies.deduplication,
                 protectedTools: [...config.strategies.deduplication.protectedTools],
             },
-            supersedeWrites: { ...config.strategies.supersedeWrites },
             purgeErrors: {
                 ...config.strategies.purgeErrors,
                 protectedTools: [...config.strategies.purgeErrors.protectedTools],

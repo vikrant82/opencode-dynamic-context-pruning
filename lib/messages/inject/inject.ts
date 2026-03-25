@@ -3,13 +3,15 @@ import type { Logger } from "../../logger"
 import type { PluginConfig } from "../../config"
 import type { RuntimePrompts } from "../../prompts/store"
 import { formatMessageIdTag } from "../../message-ids"
-import { compressPermission, getLastUserMessage } from "../../shared-utils"
+import type { CompressionPriorityMap } from "../priority"
+import { compressPermission, getLastUserMessage, messageHasCompress } from "../../shared-utils"
 import { saveSessionState } from "../../state/persistence"
 import {
-    appendIdToTool,
+    appendToTextPart,
+    appendToToolPart,
     createSyntheticTextPart,
-    findLastToolPart,
     isIgnoredUserMessage,
+    isProtectedUserMessage,
 } from "../utils"
 import {
     addAnchor,
@@ -20,7 +22,6 @@ import {
     getNudgeFrequency,
     getModelInfo,
     isContextOverLimits,
-    messageHasCompress,
 } from "./utils"
 
 export const injectCompressNudges = (
@@ -29,6 +30,7 @@ export const injectCompressNudges = (
     logger: Logger,
     messages: WithParts[],
     prompts: RuntimePrompts,
+    compressionPriorities?: CompressionPriorityMap,
 ): void => {
     if (compressPermission(state, config) === "deny") {
         return
@@ -127,7 +129,7 @@ export const injectCompressNudges = (
         }
     }
 
-    applyAnchoredNudges(state, config, messages, prompts)
+    applyAnchoredNudges(state, config, messages, prompts, compressionPriorities)
 
     if (anchorsChanged) {
         void saveSessionState(state, logger)
@@ -138,13 +140,14 @@ export const injectMessageIds = (
     state: SessionState,
     config: PluginConfig,
     messages: WithParts[],
+    compressionPriorities?: CompressionPriorityMap,
 ): void => {
     if (compressPermission(state, config) === "deny") {
         return
     }
 
     for (const message of messages) {
-        if (message.info.role === "user" && isIgnoredUserMessage(message)) {
+        if (isIgnoredUserMessage(message)) {
             continue
         }
 
@@ -153,9 +156,28 @@ export const injectMessageIds = (
             continue
         }
 
-        const tag = formatMessageIdTag(messageRef)
+        const isBlockedMessage = isProtectedUserMessage(config, message)
+        const priority =
+            config.compress.mode === "message" && !isBlockedMessage
+                ? compressionPriorities?.get(message.info.id)?.priority
+                : undefined
+        const tag = formatMessageIdTag(
+            isBlockedMessage ? "BLOCKED" : messageRef,
+            priority ? { priority } : undefined,
+        )
 
         if (message.info.role === "user") {
+            let injected = false
+            for (const part of message.parts) {
+                if (part.type === "text") {
+                    injected = appendToTextPart(part, tag) || injected
+                }
+            }
+
+            if (injected) {
+                continue
+            }
+
             message.parts.push(createSyntheticTextPart(message, tag))
             continue
         }
@@ -164,8 +186,16 @@ export const injectMessageIds = (
             continue
         }
 
-        const lastToolPart = findLastToolPart(message)
-        if (lastToolPart && appendIdToTool(lastToolPart, tag)) {
+        let injected = false
+        for (const part of message.parts) {
+            if (part.type === "text") {
+                injected = appendToTextPart(part, tag) || injected
+            } else if (part.type === "tool") {
+                injected = appendToToolPart(part, tag) || injected
+            }
+        }
+
+        if (injected) {
             continue
         }
 

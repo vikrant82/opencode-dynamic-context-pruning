@@ -5,8 +5,9 @@ import type {
     SessionState,
     WithParts,
 } from "./types"
-import { isMessageCompacted } from "../shared-utils"
+import { isMessageCompacted, messageHasCompress } from "../shared-utils"
 import { isIgnoredUserMessage } from "../messages/utils"
+import { countTokens } from "../strategies/utils"
 
 interface PersistedPruneMessagesState {
     byMessageId?: Record<string, PrunedMessageEntry>
@@ -14,6 +15,7 @@ interface PersistedPruneMessagesState {
     activeBlockIds?: number[]
     activeByAnchorMessageId?: Record<string, number>
     nextBlockId?: number
+    nextRunId?: number
 }
 
 export async function isSubAgentSession(client: any, sessionID: string): Promise<boolean> {
@@ -70,6 +72,7 @@ export function createPruneMessagesState(): PruneMessagesState {
         activeBlockIds: new Set<number>(),
         activeByAnchorMessageId: new Map<string, number>(),
         nextBlockId: 1,
+        nextRunId: 1,
     }
 }
 
@@ -83,6 +86,9 @@ export function loadPruneMessagesState(
 
     if (typeof persisted.nextBlockId === "number" && Number.isInteger(persisted.nextBlockId)) {
         state.nextBlockId = Math.max(1, persisted.nextBlockId)
+    }
+    if (typeof persisted.nextRunId === "number" && Number.isInteger(persisted.nextRunId)) {
+        state.nextRunId = Math.max(1, persisted.nextRunId)
     }
 
     if (persisted.byMessageId && typeof persisted.byMessageId === "object") {
@@ -143,6 +149,12 @@ export function loadPruneMessagesState(
 
             state.blocksById.set(blockId, {
                 blockId,
+                runId:
+                    typeof block.runId === "number" &&
+                    Number.isInteger(block.runId) &&
+                    block.runId > 0
+                        ? block.runId
+                        : blockId,
                 active: block.active === true,
                 deactivatedByUser: block.deactivatedByUser === true,
                 compressedTokens:
@@ -150,7 +162,20 @@ export function loadPruneMessagesState(
                     Number.isFinite(block.compressedTokens)
                         ? Math.max(0, block.compressedTokens)
                         : 0,
+                summaryTokens:
+                    typeof block.summaryTokens === "number" && Number.isFinite(block.summaryTokens)
+                        ? Math.max(0, block.summaryTokens)
+                        : typeof block.summary === "string"
+                          ? countTokens(block.summary)
+                          : 0,
+                mode: block.mode === "range" || block.mode === "message" ? block.mode : undefined,
                 topic: typeof block.topic === "string" ? block.topic : "",
+                batchTopic:
+                    typeof block.batchTopic === "string"
+                        ? block.batchTopic
+                        : typeof block.topic === "string"
+                          ? block.topic
+                          : "",
                 startId: typeof block.startId === "string" ? block.startId : "",
                 endId: typeof block.endId === "string" ? block.endId : "",
                 anchorMessageId:
@@ -210,21 +235,12 @@ export function loadPruneMessagesState(
         if (blockId >= state.nextBlockId) {
             state.nextBlockId = blockId + 1
         }
+        if (block.runId >= state.nextRunId) {
+            state.nextRunId = block.runId + 1
+        }
     }
 
     return state
-}
-
-function hasCompletedCompress(message: WithParts): boolean {
-    if (message.info.role !== "assistant") {
-        return false
-    }
-
-    const parts = Array.isArray(message.parts) ? message.parts : []
-    return parts.some(
-        (part) =>
-            part.type === "tool" && part.tool === "compress" && part.state?.status === "completed",
-    )
 }
 
 export function collectTurnNudgeAnchors(messages: WithParts[]): Set<string> {
@@ -234,7 +250,7 @@ export function collectTurnNudgeAnchors(messages: WithParts[]): Set<string> {
     for (let i = messages.length - 1; i >= 0; i--) {
         const message = messages[i]
 
-        if (hasCompletedCompress(message)) {
+        if (messageHasCompress(message)) {
             break
         }
 
@@ -259,6 +275,11 @@ export function resetOnCompaction(state: SessionState): void {
     state.toolParameters.clear()
     state.prune.tools = new Map<string, number>()
     state.prune.messages = createPruneMessagesState()
+    state.messageIds = {
+        byRawId: new Map<string, string>(),
+        byRef: new Map<string, string>(),
+        nextRef: 1,
+    }
     state.nudges = {
         contextLimitAnchors: new Set<string>(),
         turnNudgeAnchors: new Set<string>(),

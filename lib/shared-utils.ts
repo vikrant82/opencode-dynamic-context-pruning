@@ -28,6 +28,18 @@ export const getLastUserMessage = (
     return null
 }
 
+export const messageHasCompress = (message: WithParts): boolean => {
+    if (message.info.role !== "assistant") {
+        return false
+    }
+
+    const parts = Array.isArray(message.parts) ? message.parts : []
+    return parts.some(
+        (part) =>
+            part.type === "tool" && part.tool === "compress" && part.state?.status === "completed",
+    )
+}
+
 export const compressPermission = (
     state: SessionState,
     config: PluginConfig,

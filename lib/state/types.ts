@@ -27,12 +27,18 @@ export interface PrunedMessageEntry {
     activeBlockIds: number[]
 }
 
+export type CompressionMode = "range" | "message"
+
 export interface CompressionBlock {
     blockId: number
+    runId: number
     active: boolean
     deactivatedByUser: boolean
     compressedTokens: number
+    summaryTokens: number
+    mode?: CompressionMode
     topic: string
+    batchTopic?: string
     startId: string
     endId: string
     anchorMessageId: string
@@ -56,6 +62,7 @@ export interface PruneMessagesState {
     activeBlockIds: Set<number>
     activeByAnchorMessageId: Map<string, number>
     nextBlockId: number
+    nextRunId: number
 }
 
 export interface Prune {

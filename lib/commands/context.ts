@@ -134,7 +134,7 @@ function analyzeTokens(state: SessionState, messages: WithParts[]): TokenBreakdo
         const isCompacted = isMessageCompacted(state, msg)
         const pruneEntry = state.prune.messages.byMessageId.get(msg.info.id)
         const isMessagePruned = !!pruneEntry && pruneEntry.activeBlockIds.length > 0
-        const isIgnoredUser = msg.info.role === "user" && isIgnoredUserMessage(msg)
+        const isIgnoredUser = isIgnoredUserMessage(msg)
 
         for (const part of parts) {
             if (part.type === "tool") {
