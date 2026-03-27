@@ -18,6 +18,8 @@ import {
 } from "./lib/hooks"
 import { configureClientAuth, isSecureMode } from "./lib/auth"
 
+const id = "opencode-dynamic-context-pruning"
+
 let tuiPlugin: Record<string, unknown> = {}
 try {
     tuiPlugin = (await import("./tui/index")).default
@@ -138,6 +140,7 @@ const server: Plugin = (async (ctx) => {
 }) satisfies Plugin
 
 export default {
+    id,
     server,
     ...tuiPlugin,
 }
