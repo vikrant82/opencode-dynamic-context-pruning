@@ -161,6 +161,14 @@ function getCompressionLabel(entries: CompressionNotificationEntry[]): string {
     return `Compression #${runId}`
 }
 
+function formatCompressionMetrics(removedTokens: number, summaryTokens: number): string {
+    const metrics = [`-${formatTokenCount(removedTokens, true)} removed`]
+    if (summaryTokens > 0) {
+        metrics.push(`+${formatTokenCount(summaryTokens, true)} summary`)
+    }
+    return metrics.join(", ")
+}
+
 export async function sendCompressNotification(
     client: any,
     logger: Logger,
@@ -235,17 +243,12 @@ export async function sendCompressNotification(
 
     const totalActiveSummaryTkns = getActiveSummaryTokenUsage(state)
     const totalGross = state.stats.totalPruneTokens + state.stats.pruneTokenCounter
-    const notificationHeader =
-        totalActiveSummaryTkns > 0
-            ? `▣ DCP | ~${formatTokenCount(totalGross, true)} tokens removed (~${formatTokenCount(totalActiveSummaryTkns, true)} summary tokens added)`
-            : `▣ DCP | ~${formatTokenCount(totalGross, true)} tokens removed`
+    const notificationHeader = `▣ DCP | ${formatCompressionMetrics(totalGross, totalActiveSummaryTkns)}`
 
     if (config.pruneNotification === "minimal") {
         message = `${notificationHeader} — ${compressionLabel}`
     } else {
         message = notificationHeader
-
-        const pruneTokenCounterStr = `~${formatTokenCount(compressedTokens)}`
 
         const activePrunedMessages = new Map<string, number>()
         for (const [messageId, entry] of state.prune.messages.byMessageId) {
@@ -260,7 +263,7 @@ export async function sendCompressNotification(
             70,
         )
         message += `\n\n${progressBar}`
-        message += `\n▣ ${compressionLabel} (${pruneTokenCounterStr} removed, ~${formatTokenCount(summaryTokens, true)} summary tokens added)`
+        message += `\n▣ ${compressionLabel} ${formatCompressionMetrics(compressedTokens, summaryTokens)}`
         message += `\n→ Topic: ${topic}`
         message += `\n→ Items: ${newlyCompressedMessageIds.length} messages`
         if (newlyCompressedToolIds.length > 0) {
