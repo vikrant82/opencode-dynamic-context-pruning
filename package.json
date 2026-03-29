@@ -20,6 +20,10 @@
             "import": "./dist/tui/index.js"
         }
     },
+    "oc-plugin": [
+        "server",
+        "tui"
+    ],
     "scripts": {
         "clean": "rm -rf dist",
         "build": "npm run clean && tsup && tsc --emitDeclarationOnly",
