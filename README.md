@@ -9,10 +9,17 @@ Automatically reduces token usage in OpenCode by managing conversation context.
 
 ## Installation
 
-Add to your OpenCode config:
+Add to your OpenCode configs:
 
 ```jsonc
 // opencode.jsonc
+{
+    "plugin": ["@tarquinen/opencode-dcp@latest"],
+}
+```
+
+```jsonc
+// tui.jsonc
 {
     "plugin": ["@tarquinen/opencode-dcp@latest"],
 }
