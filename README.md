@@ -14,18 +14,18 @@ Add to your OpenCode configs:
 ```jsonc
 // opencode.jsonc
 {
-    "plugin": ["@tarquinen/opencode-dcp@latest"],
+    "plugin": ["@tarquinen/opencode-dcp@beta"],
 }
 ```
 
 ```jsonc
 // tui.jsonc
 {
-    "plugin": ["@tarquinen/opencode-dcp@latest"],
+    "plugin": ["@tarquinen/opencode-dcp@beta"],
 }
 ```
 
-Using `@latest` ensures you always get the newest version automatically when OpenCode starts.
+Using `@beta` keeps you on the current prerelease channel when OpenCode starts.
 
 Restart OpenCode. The plugin will automatically start optimizing your sessions.
 
