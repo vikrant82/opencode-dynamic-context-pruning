@@ -1,4 +1,4 @@
-import type { SessionState, ToolParameterEntry, WithParts } from "./types"
+import type { CompressionStart, SessionState, ToolParameterEntry, WithParts } from "./types"
 import type { Logger } from "../logger"
 import { loadSessionState, saveSessionState } from "./persistence"
 import {
@@ -81,6 +81,8 @@ export function createSessionState(): SessionState {
             pruneTokenCounter: 0,
             totalPruneTokens: 0,
         },
+        compressionStarts: new Map<string, CompressionStart>(),
+        compressionDurations: new Map<string, number>(),
         toolParameters: new Map<string, ToolParameterEntry>(),
         subAgentResultCache: new Map<string, string>(),
         toolIdList: [],

@@ -26,6 +26,41 @@ export function allocateRunId(state: SessionState): number {
     return next
 }
 
+export function recordCompressionDuration(
+    state: SessionState,
+    callId: string,
+    durationMs: number,
+): void {
+    state.compressionDurations.set(callId, durationMs)
+}
+
+export function attachCompressionDuration(
+    state: SessionState,
+    callId: string,
+    messageId: string,
+): number {
+    const durationMs = state.compressionDurations.get(callId)
+    if (typeof durationMs !== "number" || !Number.isFinite(durationMs)) {
+        return 0
+    }
+
+    state.compressionDurations.delete(callId)
+
+    let updates = 0
+    for (const block of state.prune.messages.blocksById.values()) {
+        const matchesCall = block.compressCallId === callId
+        const matchesMessage = !block.compressCallId && block.compressMessageId === messageId
+        if (!matchesCall && !matchesMessage) {
+            continue
+        }
+
+        block.durationMs = durationMs
+        updates++
+    }
+
+    return updates
+}
+
 export function wrapCompressedSummary(blockId: number, summary: string): string {
     const header = COMPRESSED_BLOCK_HEADER
     const footer = formatMessageIdTag(formatBlockRef(blockId))
@@ -93,6 +128,7 @@ export function applyCompressionState(
         deactivatedByUser: false,
         compressedTokens: 0,
         summaryTokens: input.summaryTokens,
+        durationMs: input.durationMs,
         mode: input.mode,
         topic: input.topic,
         batchTopic: input.batchTopic,
@@ -100,6 +136,7 @@ export function applyCompressionState(
         endId: input.endId,
         anchorMessageId,
         compressMessageId: input.compressMessageId,
+        compressCallId: input.compressCallId,
         includedBlockIds: included,
         consumedBlockIds: consumed,
         parentBlockIds: [],

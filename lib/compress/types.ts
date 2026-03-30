@@ -103,5 +103,7 @@ export interface CompressionStateInput {
     mode: CompressionMode
     runId: number
     compressMessageId: string
+    compressCallId?: string
     summaryTokens: number
+    durationMs: number
 }

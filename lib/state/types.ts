@@ -21,6 +21,11 @@ export interface SessionStats {
     totalPruneTokens: number
 }
 
+export interface CompressionStart {
+    messageId: string
+    startedAt: number
+}
+
 export interface PrunedMessageEntry {
     tokenCount: number
     allBlockIds: number[]
@@ -36,6 +41,7 @@ export interface CompressionBlock {
     deactivatedByUser: boolean
     compressedTokens: number
     summaryTokens: number
+    durationMs: number
     mode?: CompressionMode
     topic: string
     batchTopic?: string
@@ -43,6 +49,7 @@ export interface CompressionBlock {
     endId: string
     anchorMessageId: string
     compressMessageId: string
+    compressCallId?: string
     includedBlockIds: number[]
     consumedBlockIds: number[]
     parentBlockIds: number[]
@@ -96,6 +103,8 @@ export interface SessionState {
     prune: Prune
     nudges: Nudges
     stats: SessionStats
+    compressionStarts: Map<string, CompressionStart>
+    compressionDurations: Map<string, number>
     toolParameters: Map<string, ToolParameterEntry>
     subAgentResultCache: Map<string, string>
     toolIdList: string[]

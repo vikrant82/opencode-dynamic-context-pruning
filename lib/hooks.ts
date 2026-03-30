@@ -16,6 +16,7 @@ import {
 } from "./messages"
 import { renderSystemPrompt, type PromptStore } from "./prompts"
 import { buildProtectedToolsExtension } from "./prompts/extensions/system"
+import { attachCompressionDuration, recordCompressionDuration } from "./compress/state"
 import {
     applyPendingManualTrigger,
     handleContextCommand,
@@ -29,7 +30,7 @@ import {
 } from "./commands"
 import { type HostPermissionSnapshot } from "./host-permissions"
 import { compressPermission, syncCompressPermissionState } from "./compress-permission"
-import { checkSession, ensureSessionInitialized, syncToolCache } from "./state"
+import { checkSession, ensureSessionInitialized, saveSessionState, syncToolCache } from "./state"
 import { cacheSystemPromptTokens } from "./ui/utils"
 
 const INTERNAL_AGENT_SIGNATURES = [
@@ -263,6 +264,135 @@ export function createTextCompleteHandler() {
         output: { text: string },
     ) => {
         output.text = stripHallucinationsFromString(output.text)
+    }
+}
+
+export function createEventHandler(state: SessionState, logger: Logger) {
+    return async (input: { event: any }) => {
+        const eventTime =
+            typeof input.event?.time === "number" && Number.isFinite(input.event.time)
+                ? input.event.time
+                : typeof input.event?.properties?.time === "number" &&
+                    Number.isFinite(input.event.properties.time)
+                  ? input.event.properties.time
+                  : undefined
+
+        if (input.event.type !== "message.part.updated") {
+            return
+        }
+
+        const part = input.event.properties?.part
+        if (part?.type !== "tool" || part.tool !== "compress") {
+            return
+        }
+
+        if (part.state.status === "pending") {
+            if (typeof part.callID !== "string" || typeof part.messageID !== "string") {
+                return
+            }
+
+            if (state.compressionStarts.has(part.callID)) {
+                return
+            }
+
+            const startedAt = eventTime ?? Date.now()
+            state.compressionStarts.set(part.callID, {
+                messageId: part.messageID,
+                startedAt,
+            })
+            logger.debug("Recorded compression start", {
+                callID: part.callID,
+                messageID: part.messageID,
+                startedAt,
+            })
+            return
+        }
+
+        if (part.state.status === "running") {
+            if (typeof part.callID !== "string") {
+                return
+            }
+
+            const start = state.compressionStarts.get(part.callID)
+            if (!start) {
+                return
+            }
+
+            const runningAt =
+                typeof part.state.time?.start === "number" && Number.isFinite(part.state.time.start)
+                    ? part.state.time.start
+                    : eventTime
+            if (typeof runningAt !== "number") {
+                return
+            }
+
+            state.compressionStarts.delete(part.callID)
+            const durationMs = Math.max(0, runningAt - start.startedAt)
+            recordCompressionDuration(state, part.callID, durationMs)
+
+            logger.info("Recorded compression time", {
+                callID: part.callID,
+                messageID: start.messageId,
+                durationMs,
+            })
+            return
+        }
+
+        if (part.state.status === "completed") {
+            if (typeof part.callID !== "string" || typeof part.messageID !== "string") {
+                return
+            }
+
+            if (!state.compressionDurations.has(part.callID)) {
+                const start = state.compressionStarts.get(part.callID)
+                const runningAt =
+                    typeof part.state.time?.start === "number" &&
+                    Number.isFinite(part.state.time.start)
+                        ? part.state.time.start
+                        : eventTime
+
+                if (start && typeof runningAt === "number") {
+                    state.compressionStarts.delete(part.callID)
+                    const durationMs = Math.max(0, runningAt - start.startedAt)
+                    recordCompressionDuration(state, part.callID, durationMs)
+                } else {
+                    const toolStart = part.state.time?.start
+                    const toolEnd = part.state.time?.end
+                    if (
+                        typeof toolStart === "number" &&
+                        Number.isFinite(toolStart) &&
+                        typeof toolEnd === "number" &&
+                        Number.isFinite(toolEnd)
+                    ) {
+                        const durationMs = Math.max(0, toolEnd - toolStart)
+                        recordCompressionDuration(state, part.callID, durationMs)
+                    }
+                }
+            }
+
+            const updates = attachCompressionDuration(state, part.callID, part.messageID)
+            if (updates === 0) {
+                return
+            }
+
+            logger.info("Attached compression time to blocks", {
+                callID: part.callID,
+                messageID: part.messageID,
+                blocks: updates,
+            })
+
+            saveSessionState(state, logger).catch((error) => {
+                logger.warn("Failed to persist compression time update", {
+                    error: error instanceof Error ? error.message : String(error),
+                })
+            })
+            return
+        }
+
+        if (typeof part.callID === "string") {
+            state.compressionStarts.delete(part.callID)
+            state.compressionDurations.delete(part.callID)
+        }
     }
 }
 

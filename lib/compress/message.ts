@@ -48,6 +48,10 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
         async execute(args, toolCtx) {
             const input = args as CompressMessageToolArgs
             validateArgs(input)
+            const callId =
+                typeof (toolCtx as unknown as { callID?: unknown }).callID === "string"
+                    ? (toolCtx as unknown as { callID: string }).callID
+                    : undefined
 
             const { rawMessages, searchContext } = await prepareSession(
                 ctx,
@@ -107,7 +111,9 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
                         mode: "message",
                         runId,
                         compressMessageId: toolCtx.messageID,
+                        compressCallId: callId,
                         summaryTokens,
+                        durationMs: 0,
                     },
                     plan.selection,
                     plan.anchorMessageId,

@@ -5,6 +5,7 @@ export interface CompressionTarget {
     runId: number
     topic: string
     compressedTokens: number
+    durationMs: number
     grouped: boolean
     blocks: CompressionBlock[]
 }
@@ -26,6 +27,7 @@ function buildTarget(blocks: CompressionBlock[]): CompressionTarget {
         runId: first.runId,
         topic: grouped ? first.batchTopic || first.topic : first.topic,
         compressedTokens: ordered.reduce((total, block) => total + block.compressedTokens, 0),
+        durationMs: ordered.reduce((total, block) => Math.max(total, block.durationMs), 0),
         grouped,
         blocks: ordered,
     }

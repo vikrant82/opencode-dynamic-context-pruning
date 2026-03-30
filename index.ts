@@ -13,6 +13,7 @@ import {
     createChatMessageHandler,
     createChatMessageTransformHandler,
     createCommandExecuteHandler,
+    createEventHandler,
     createSystemPromptHandler,
     createTextCompleteHandler,
 } from "./lib/hooks"
@@ -68,6 +69,7 @@ const plugin: Plugin = (async (ctx) => {
         ) as any,
         "chat.message": createChatMessageHandler(state, logger, config, hostPermissions),
         "experimental.text.complete": createTextCompleteHandler(),
+        event: createEventHandler(state, logger),
         "command.execute.before": createCommandExecuteHandler(
             ctx.client,
             state,

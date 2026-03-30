@@ -9,6 +9,7 @@ import { sendIgnoredMessage } from "../ui/notification"
 import { formatTokenCount } from "../ui/utils"
 import { loadAllSessionStats, type AggregatedStats } from "../state/persistence"
 import { getCurrentParams } from "../token-utils"
+import { getActiveCompressionTargets } from "./compression-targets"
 
 export interface StatsCommandContext {
     client: any
@@ -22,6 +23,7 @@ function formatStatsMessage(
     sessionTokens: number,
     sessionTools: number,
     sessionMessages: number,
+    sessionDurationMs: number,
     allTime: AggregatedStats,
 ): string {
     const lines: string[] = []
@@ -35,6 +37,7 @@ function formatStatsMessage(
     lines.push(`  Tokens pruned:   ~${formatTokenCount(sessionTokens)}`)
     lines.push(`  Tools pruned:     ${sessionTools}`)
     lines.push(`  Messages pruned:  ${sessionMessages}`)
+    lines.push(`  Compression time: ${formatCompressionTime(sessionDurationMs)}`)
     lines.push("")
     lines.push("All-time:")
     lines.push("─".repeat(60))
@@ -46,11 +49,38 @@ function formatStatsMessage(
     return lines.join("\n")
 }
 
+function formatCompressionTime(ms: number): string {
+    const safeMs = Math.max(0, Math.round(ms))
+    if (safeMs < 1000) {
+        return `${safeMs} ms`
+    }
+
+    const totalSeconds = safeMs / 1000
+    if (totalSeconds < 60) {
+        return `${totalSeconds.toFixed(1)} s`
+    }
+
+    const wholeSeconds = Math.floor(totalSeconds)
+    const hours = Math.floor(wholeSeconds / 3600)
+    const minutes = Math.floor((wholeSeconds % 3600) / 60)
+    const seconds = wholeSeconds % 60
+
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${seconds}s`
+    }
+
+    return `${minutes}m ${seconds}s`
+}
+
 export async function handleStatsCommand(ctx: StatsCommandContext): Promise<void> {
     const { client, state, logger, sessionId, messages } = ctx
 
     // Session stats from in-memory state
     const sessionTokens = state.stats.totalPruneTokens
+    const sessionDurationMs = getActiveCompressionTargets(state.prune.messages).reduce(
+        (total, target) => total + target.durationMs,
+        0,
+    )
 
     const prunedToolIds = new Set<string>(state.prune.tools.keys())
     for (const block of state.prune.messages.blocksById.values()) {
@@ -72,7 +102,13 @@ export async function handleStatsCommand(ctx: StatsCommandContext): Promise<void
     // All-time stats from storage files
     const allTime = await loadAllSessionStats(logger)
 
-    const message = formatStatsMessage(sessionTokens, sessionTools, sessionMessages, allTime)
+    const message = formatStatsMessage(
+        sessionTokens,
+        sessionTools,
+        sessionMessages,
+        sessionDurationMs,
+        allTime,
+    )
 
     const params = getCurrentParams(state, messages, logger)
     await sendIgnoredMessage(client, sessionId, message, params, logger)
@@ -81,6 +117,7 @@ export async function handleStatsCommand(ctx: StatsCommandContext): Promise<void
         sessionTokens,
         sessionTools,
         sessionMessages,
+        sessionDurationMs,
         allTimeTokens: allTime.totalTokens,
         allTimeTools: allTime.totalTools,
         allTimeMessages: allTime.totalMessages,
