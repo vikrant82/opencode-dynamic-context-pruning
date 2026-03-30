@@ -17,17 +17,6 @@ opencode plugin @tarquinen/opencode-dcp@latest --global
 
 This installs the package and adds it to your global OpenCode config.
 
-Or add it to your OpenCode config manually:
-
-```jsonc
-// opencode.jsonc
-{
-    "plugin": ["@tarquinen/opencode-dcp@latest"],
-}
-```
-
-Using `@latest` ensures you always get the newest version automatically when OpenCode starts.
-
 Restart OpenCode. The plugin will automatically start optimizing your sessions.
 
 ## How It Works
