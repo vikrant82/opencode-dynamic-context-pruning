@@ -59,6 +59,10 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
         async execute(args, toolCtx) {
             const input = args as CompressRangeToolArgs
             validateArgs(input)
+            const callId =
+                typeof (toolCtx as unknown as { callID?: unknown }).callID === "string"
+                    ? (toolCtx as unknown as { callID: string }).callID
+                    : undefined
 
             const { rawMessages, searchContext } = await prepareSession(
                 ctx,
@@ -148,6 +152,7 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                         mode: "range",
                         runId,
                         compressMessageId: toolCtx.messageID,
+                        compressCallId: callId,
                         summaryTokens,
                     },
                     preparedPlan.selection,

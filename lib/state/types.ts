@@ -1,3 +1,4 @@
+import type { CompressionTimingState } from "../compress/timing"
 import { Message, Part } from "@opencode-ai/sdk/v2"
 
 export interface WithParts {
@@ -36,6 +37,7 @@ export interface CompressionBlock {
     deactivatedByUser: boolean
     compressedTokens: number
     summaryTokens: number
+    durationMs: number
     mode?: CompressionMode
     topic: string
     batchTopic?: string
@@ -43,6 +45,7 @@ export interface CompressionBlock {
     endId: string
     anchorMessageId: string
     compressMessageId: string
+    compressCallId?: string
     includedBlockIds: number[]
     consumedBlockIds: number[]
     parentBlockIds: number[]
@@ -96,6 +99,7 @@ export interface SessionState {
     prune: Prune
     nudges: Nudges
     stats: SessionStats
+    compressionTiming: CompressionTimingState
     toolParameters: Map<string, ToolParameterEntry>
     subAgentResultCache: Map<string, string>
     toolIdList: string[]

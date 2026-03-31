@@ -17,6 +17,11 @@ import {
 import { renderSystemPrompt, type PromptStore } from "./prompts"
 import { buildProtectedToolsExtension } from "./prompts/extensions/system"
 import {
+    applyPendingCompressionDurations,
+    consumeCompressionStart,
+    resolveCompressionDuration,
+} from "./compress/timing"
+import {
     applyPendingManualTrigger,
     handleContextCommand,
     handleDecompressCommand,
@@ -29,7 +34,7 @@ import {
 } from "./commands"
 import { type HostPermissionSnapshot } from "./host-permissions"
 import { compressPermission, syncCompressPermissionState } from "./compress-permission"
-import { checkSession, ensureSessionInitialized, syncToolCache } from "./state"
+import { checkSession, ensureSessionInitialized, saveSessionState, syncToolCache } from "./state"
 import { cacheSystemPromptTokens } from "./ui/utils"
 
 const INTERNAL_AGENT_SIGNATURES = [
@@ -263,6 +268,83 @@ export function createTextCompleteHandler() {
         output: { text: string },
     ) => {
         output.text = stripHallucinationsFromString(output.text)
+    }
+}
+
+export function createEventHandler(state: SessionState, logger: Logger) {
+    return async (input: { event: any }) => {
+        const eventTime =
+            typeof input.event?.time === "number" && Number.isFinite(input.event.time)
+                ? input.event.time
+                : typeof input.event?.properties?.time === "number" &&
+                    Number.isFinite(input.event.properties.time)
+                  ? input.event.properties.time
+                  : undefined
+
+        if (input.event.type !== "message.part.updated") {
+            return
+        }
+
+        const part = input.event.properties?.part
+        if (part?.type !== "tool" || part.tool !== "compress") {
+            return
+        }
+
+        if (part.state.status === "pending") {
+            if (typeof part.callID !== "string") {
+                return
+            }
+
+            const startedAt = eventTime ?? Date.now()
+            if (state.compressionTiming.startsByCallId.has(part.callID)) {
+                return
+            }
+            state.compressionTiming.startsByCallId.set(part.callID, startedAt)
+            logger.debug("Recorded compression start", {
+                callID: part.callID,
+                startedAt,
+            })
+            return
+        }
+
+        if (part.state.status === "completed") {
+            if (typeof part.callID !== "string") {
+                return
+            }
+
+            const start = consumeCompressionStart(state, part.callID)
+            const durationMs = resolveCompressionDuration(start, eventTime, part.state.time)
+            if (typeof durationMs !== "number") {
+                return
+            }
+
+            state.compressionTiming.pendingByCallId.set(part.callID, {
+                callId: part.callID,
+                durationMs,
+            })
+
+            const updates = applyPendingCompressionDurations(state)
+            if (updates === 0) {
+                return
+            }
+
+            await saveSessionState(state, logger)
+
+            logger.info("Attached compression time to blocks", {
+                callID: part.callID,
+                blocks: updates,
+                durationMs,
+            })
+            return
+        }
+
+        if (part.state.status === "running") {
+            return
+        }
+
+        if (typeof part.callID === "string") {
+            state.compressionTiming.startsByCallId.delete(part.callID)
+        }
     }
 }
 

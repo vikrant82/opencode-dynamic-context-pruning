@@ -10,6 +10,7 @@ import { homedir } from "os"
 import { join } from "path"
 import type { CompressionBlock, PrunedMessageEntry, SessionState, SessionStats } from "./types"
 import type { Logger } from "../logger"
+import { serializePruneMessagesState } from "./utils"
 
 /** Prune state as stored on disk */
 export interface PersistedPruneMessagesState {
@@ -58,6 +59,23 @@ function getSessionFilePath(sessionId: string): string {
     return join(STORAGE_DIR, `${sessionId}.json`)
 }
 
+async function writePersistedSessionState(
+    sessionId: string,
+    state: PersistedSessionState,
+    logger: Logger,
+): Promise<void> {
+    await ensureStorageDir()
+
+    const filePath = getSessionFilePath(sessionId)
+    const content = JSON.stringify(state, null, 2)
+    await fs.writeFile(filePath, content, "utf-8")
+
+    logger.info("Saved session state to disk", {
+        sessionId,
+        totalTokensSaved: state.stats.totalPruneTokens,
+    })
+}
+
 export async function saveSessionState(
     sessionState: SessionState,
     logger: Logger,
@@ -68,26 +86,11 @@ export async function saveSessionState(
             return
         }
 
-        await ensureStorageDir()
-
         const state: PersistedSessionState = {
             sessionName: sessionName,
             prune: {
                 tools: Object.fromEntries(sessionState.prune.tools),
-                messages: {
-                    byMessageId: Object.fromEntries(sessionState.prune.messages.byMessageId),
-                    blocksById: Object.fromEntries(
-                        Array.from(sessionState.prune.messages.blocksById.entries()).map(
-                            ([blockId, block]) => [String(blockId), block],
-                        ),
-                    ),
-                    activeBlockIds: Array.from(sessionState.prune.messages.activeBlockIds),
-                    activeByAnchorMessageId: Object.fromEntries(
-                        sessionState.prune.messages.activeByAnchorMessageId,
-                    ),
-                    nextBlockId: sessionState.prune.messages.nextBlockId,
-                    nextRunId: sessionState.prune.messages.nextRunId,
-                },
+                messages: serializePruneMessagesState(sessionState.prune.messages),
             },
             nudges: {
                 contextLimitAnchors: Array.from(sessionState.nudges.contextLimitAnchors),
@@ -98,14 +101,7 @@ export async function saveSessionState(
             lastUpdated: new Date().toISOString(),
         }
 
-        const filePath = getSessionFilePath(sessionState.sessionId)
-        const content = JSON.stringify(state, null, 2)
-        await fs.writeFile(filePath, content, "utf-8")
-
-        logger.info("Saved session state to disk", {
-            sessionId: sessionState.sessionId,
-            totalTokensSaved: state.stats.totalPruneTokens,
-        })
+        await writePersistedSessionState(sessionState.sessionId, state, logger)
     } catch (error: any) {
         logger.error("Failed to save session state", {
             sessionId: sessionState.sessionId,

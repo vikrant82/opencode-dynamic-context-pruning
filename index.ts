@@ -13,6 +13,7 @@ import {
     createChatMessageHandler,
     createChatMessageTransformHandler,
     createCommandExecuteHandler,
+    createEventHandler,
     createSystemPromptHandler,
     createTextCompleteHandler,
 } from "./lib/hooks"
@@ -57,7 +58,6 @@ const plugin: Plugin = (async (ctx) => {
             config,
             prompts,
         ),
-
         "experimental.chat.messages.transform": createChatMessageTransformHandler(
             ctx.client,
             state,
@@ -76,6 +76,7 @@ const plugin: Plugin = (async (ctx) => {
             ctx.directory,
             hostPermissions,
         ),
+        event: createEventHandler(state, logger),
         tool: {
             ...(config.compress.permission !== "deny" && {
                 compress:

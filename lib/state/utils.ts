@@ -20,12 +20,30 @@ export const isMessageCompacted = (state: SessionState, msg: WithParts): boolean
 }
 
 interface PersistedPruneMessagesState {
-    byMessageId?: Record<string, PrunedMessageEntry>
-    blocksById?: Record<string, CompressionBlock>
-    activeBlockIds?: number[]
-    activeByAnchorMessageId?: Record<string, number>
-    nextBlockId?: number
-    nextRunId?: number
+    byMessageId: Record<string, PrunedMessageEntry>
+    blocksById: Record<string, CompressionBlock>
+    activeBlockIds: number[]
+    activeByAnchorMessageId: Record<string, number>
+    nextBlockId: number
+    nextRunId: number
+}
+
+export function serializePruneMessagesState(
+    messagesState: PruneMessagesState,
+): PersistedPruneMessagesState {
+    return {
+        byMessageId: Object.fromEntries(messagesState.byMessageId),
+        blocksById: Object.fromEntries(
+            Array.from(messagesState.blocksById.entries()).map(([blockId, block]) => [
+                String(blockId),
+                block,
+            ]),
+        ),
+        activeBlockIds: Array.from(messagesState.activeBlockIds),
+        activeByAnchorMessageId: Object.fromEntries(messagesState.activeByAnchorMessageId),
+        nextBlockId: messagesState.nextBlockId,
+        nextRunId: messagesState.nextRunId,
+    }
 }
 
 export async function isSubAgentSession(client: any, sessionID: string): Promise<boolean> {
@@ -178,6 +196,10 @@ export function loadPruneMessagesState(
                         : typeof block.summary === "string"
                           ? countTokens(block.summary)
                           : 0,
+                durationMs:
+                    typeof block.durationMs === "number" && Number.isFinite(block.durationMs)
+                        ? Math.max(0, block.durationMs)
+                        : 0,
                 mode: block.mode === "range" || block.mode === "message" ? block.mode : undefined,
                 topic: typeof block.topic === "string" ? block.topic : "",
                 batchTopic:
@@ -192,6 +214,8 @@ export function loadPruneMessagesState(
                     typeof block.anchorMessageId === "string" ? block.anchorMessageId : "",
                 compressMessageId:
                     typeof block.compressMessageId === "string" ? block.compressMessageId : "",
+                compressCallId:
+                    typeof block.compressCallId === "string" ? block.compressCallId : undefined,
                 includedBlockIds: toNumberArray(block.includedBlockIds),
                 consumedBlockIds: toNumberArray(block.consumedBlockIds),
                 parentBlockIds: toNumberArray(block.parentBlockIds),

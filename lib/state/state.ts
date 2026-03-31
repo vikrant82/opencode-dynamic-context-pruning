@@ -1,5 +1,6 @@
 import type { SessionState, ToolParameterEntry, WithParts } from "./types"
 import type { Logger } from "../logger"
+import { applyPendingCompressionDurations } from "../compress/timing"
 import { loadSessionState, saveSessionState } from "./persistence"
 import {
     isSubAgentSession,
@@ -80,6 +81,10 @@ export function createSessionState(): SessionState {
         stats: {
             pruneTokenCounter: 0,
             totalPruneTokens: 0,
+        },
+        compressionTiming: {
+            startsByCallId: new Map<string, number>(),
+            pendingByCallId: new Map(),
         },
         toolParameters: new Map<string, ToolParameterEntry>(),
         subAgentResultCache: new Map<string, string>(),
@@ -176,5 +181,10 @@ export async function ensureSessionInitialized(
     state.stats = {
         pruneTokenCounter: persisted.stats?.pruneTokenCounter || 0,
         totalPruneTokens: persisted.stats?.totalPruneTokens || 0,
+    }
+
+    const applied = applyPendingCompressionDurations(state)
+    if (applied > 0) {
+        await saveSessionState(state, logger)
     }
 }

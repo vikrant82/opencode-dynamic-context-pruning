@@ -226,6 +226,55 @@ test("compress message mode batches individual message summaries", async () => {
     assert.match(blocks[1]?.summary || "", /task output body/)
 })
 
+test("compress message mode stores call id for later duration attachment", async () => {
+    const sessionID = `ses_message_compress_duration_${Date.now()}`
+    const rawMessages = buildMessages(sessionID)
+    const state = createSessionState()
+    const logger = new Logger(false)
+
+    const tool = createCompressMessageTool({
+        client: {
+            session: {
+                messages: async () => ({ data: rawMessages }),
+                get: async () => ({ data: { parentID: null } }),
+            },
+        },
+        state,
+        logger,
+        config: buildConfig(),
+        prompts: {
+            reload() {},
+            getRuntimePrompts() {
+                return { compressMessage: "", compressRange: "" }
+            },
+        },
+    } as any)
+
+    await tool.execute(
+        {
+            topic: "Batch stale notes",
+            content: [
+                {
+                    messageId: "m0002",
+                    topic: "Code path note",
+                    summary: "Captured the assistant's code-path findings.",
+                },
+            ],
+        },
+        {
+            ask: async () => {},
+            metadata: () => {},
+            sessionID,
+            messageID: "msg-compress-message",
+            callID: "call-1",
+        },
+    )
+
+    const block = Array.from(state.prune.messages.blocksById.values())[0]
+    assert.equal(block?.compressCallId, "call-1")
+    assert.equal(block?.durationMs, 0)
+})
+
 test("compress message mode does not partially apply when preparation fails", async () => {
     const sessionID = `ses_message_compress_prepare_fail_${Date.now()}`
     const rawMessages = buildMessages(sessionID)
