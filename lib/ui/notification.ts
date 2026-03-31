@@ -238,7 +238,7 @@ export async function sendCompressNotification(
         batchTopic ??
         (entries.length === 1
             ? (state.prune.messages.blocksById.get(entries[0]?.blockId ?? -1)?.topic ??
-                "(unknown topic)")
+              "(unknown topic)")
             : "(unknown topic)")
 
     const totalActiveSummaryTkns = getActiveSummaryTokenUsage(state)
@@ -317,9 +317,9 @@ export async function sendIgnoredMessage(
     const model =
         params.providerId && params.modelId
             ? {
-                providerID: params.providerId,
-                modelID: params.modelId,
-            }
+                  providerID: params.providerId,
+                  modelID: params.modelId,
+              }
             : undefined
 
     try {
