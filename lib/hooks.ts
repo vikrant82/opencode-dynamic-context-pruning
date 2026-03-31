@@ -18,10 +18,7 @@ import { renderSystemPrompt, type PromptStore } from "./prompts"
 import { buildProtectedToolsExtension } from "./prompts/extensions/system"
 import {
     applyPendingCompressionDurations,
-    clearCompressionStart,
     consumeCompressionStart,
-    queueCompressionDuration,
-    recordCompressionStart,
     resolveCompressionDuration,
 } from "./compress/timing"
 import {
@@ -299,9 +296,10 @@ export function createEventHandler(state: SessionState, logger: Logger) {
             }
 
             const startedAt = eventTime ?? Date.now()
-            if (!recordCompressionStart(state, part.callID, startedAt)) {
+            if (state.compressionTiming.startsByCallId.has(part.callID)) {
                 return
             }
+            state.compressionTiming.startsByCallId.set(part.callID, startedAt)
             logger.debug("Recorded compression start", {
                 callID: part.callID,
                 startedAt,
@@ -320,7 +318,10 @@ export function createEventHandler(state: SessionState, logger: Logger) {
                 return
             }
 
-            queueCompressionDuration(state, part.callID, durationMs)
+            state.compressionTiming.pendingByCallId.set(part.callID, {
+                callId: part.callID,
+                durationMs,
+            })
 
             const updates = applyPendingCompressionDurations(state)
             if (updates === 0) {
@@ -342,7 +343,7 @@ export function createEventHandler(state: SessionState, logger: Logger) {
         }
 
         if (typeof part.callID === "string") {
-            clearCompressionStart(state, part.callID)
+            state.compressionTiming.startsByCallId.delete(part.callID)
         }
     }
 }

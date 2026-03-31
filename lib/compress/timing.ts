@@ -18,27 +18,10 @@ export function createCompressionTimingState(): CompressionTimingState {
     }
 }
 
-export function recordCompressionStart(
-    state: SessionState,
-    callId: string,
-    startedAt: number,
-): boolean {
-    if (state.compressionTiming.startsByCallId.has(callId)) {
-        return false
-    }
-
-    state.compressionTiming.startsByCallId.set(callId, startedAt)
-    return true
-}
-
 export function consumeCompressionStart(state: SessionState, callId: string): number | undefined {
     const start = state.compressionTiming.startsByCallId.get(callId)
     state.compressionTiming.startsByCallId.delete(callId)
     return start
-}
-
-export function clearCompressionStart(state: SessionState, callId: string): void {
-    state.compressionTiming.startsByCallId.delete(callId)
 }
 
 export function resolveCompressionDuration(
@@ -66,14 +49,6 @@ export function resolveCompressionDuration(
             : undefined
 
     return typeof pendingToRunningMs === "number" ? pendingToRunningMs : runtimeMs
-}
-
-export function queueCompressionDuration(
-    state: SessionState,
-    callId: string,
-    durationMs: number,
-): void {
-    state.compressionTiming.pendingByCallId.set(callId, { callId, durationMs })
 }
 
 export function applyPendingCompressionDurations(state: SessionState): number {
