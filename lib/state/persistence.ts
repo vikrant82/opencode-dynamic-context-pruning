@@ -35,9 +35,18 @@ export interface PersistedNudges {
 export interface PersistedSessionState {
     sessionName?: string
     prune: PersistedPrune
+    compression?: PersistedCompressionStats
     nudges: PersistedNudges
     stats: SessionStats
     lastUpdated: string
+}
+
+export interface PersistedCompressionStats {
+    inputTokens: number
+    summaryTokens: number
+    durationMs: number
+    tools: number
+    messages: number
 }
 
 const STORAGE_DIR = join(
@@ -58,6 +67,48 @@ function getSessionFilePath(sessionId: string): string {
     return join(STORAGE_DIR, `${sessionId}.json`)
 }
 
+export function derivePersistedCompressionStats(
+    prune: PersistedPrune,
+    stats: SessionStats,
+): PersistedCompressionStats {
+    const messages = prune.messages
+    const blocks = Object.values(messages?.blocksById || {})
+    const activeBlocks = blocks.filter((block) => block.active)
+    const activeToolIds = new Set<string>(Object.keys(prune.tools || {}))
+    for (const block of activeBlocks) {
+        for (const toolId of block.effectiveToolIds || []) {
+            activeToolIds.add(toolId)
+        }
+    }
+
+    const groupedDurations = new Map<number, number>()
+    const rangeDurationMs = activeBlocks.reduce((total, block) => {
+        if (block.mode === "message") {
+            const current = groupedDurations.get(block.runId) || 0
+            groupedDurations.set(block.runId, Math.max(current, block.durationMs || 0))
+            return total
+        }
+
+        return total + (block.durationMs || 0)
+    }, 0)
+
+    const groupedDurationMs = Array.from(groupedDurations.values()).reduce(
+        (total, durationMs) => total + durationMs,
+        0,
+    )
+
+    return {
+        inputTokens: stats.totalPruneTokens,
+        summaryTokens: activeBlocks.reduce((total, block) => total + (block.summaryTokens || 0), 0),
+        durationMs: rangeDurationMs + groupedDurationMs,
+        tools: activeToolIds.size,
+        messages: Object.values(messages?.byMessageId || {}).reduce(
+            (total, entry) => total + (entry.activeBlockIds?.length > 0 ? 1 : 0),
+            0,
+        ),
+    }
+}
+
 export async function saveSessionState(
     sessionState: SessionState,
     logger: Logger,
@@ -70,25 +121,28 @@ export async function saveSessionState(
 
         await ensureStorageDir()
 
+        const prune: PersistedPrune = {
+            tools: Object.fromEntries(sessionState.prune.tools),
+            messages: {
+                byMessageId: Object.fromEntries(sessionState.prune.messages.byMessageId),
+                blocksById: Object.fromEntries(
+                    Array.from(sessionState.prune.messages.blocksById.entries()).map(
+                        ([blockId, block]) => [String(blockId), block],
+                    ),
+                ),
+                activeBlockIds: Array.from(sessionState.prune.messages.activeBlockIds),
+                activeByAnchorMessageId: Object.fromEntries(
+                    sessionState.prune.messages.activeByAnchorMessageId,
+                ),
+                nextBlockId: sessionState.prune.messages.nextBlockId,
+                nextRunId: sessionState.prune.messages.nextRunId,
+            },
+        }
+
         const state: PersistedSessionState = {
             sessionName: sessionName,
-            prune: {
-                tools: Object.fromEntries(sessionState.prune.tools),
-                messages: {
-                    byMessageId: Object.fromEntries(sessionState.prune.messages.byMessageId),
-                    blocksById: Object.fromEntries(
-                        Array.from(sessionState.prune.messages.blocksById.entries()).map(
-                            ([blockId, block]) => [String(blockId), block],
-                        ),
-                    ),
-                    activeBlockIds: Array.from(sessionState.prune.messages.activeBlockIds),
-                    activeByAnchorMessageId: Object.fromEntries(
-                        sessionState.prune.messages.activeByAnchorMessageId,
-                    ),
-                    nextBlockId: sessionState.prune.messages.nextBlockId,
-                    nextRunId: sessionState.prune.messages.nextRunId,
-                },
-            },
+            prune,
+            compression: derivePersistedCompressionStats(prune, sessionState.stats),
             nudges: {
                 contextLimitAnchors: Array.from(sessionState.nudges.contextLimitAnchors),
                 turnNudgeAnchors: Array.from(sessionState.nudges.turnNudgeAnchors),
@@ -241,46 +295,18 @@ export async function loadAllSessionStats(logger: Logger): Promise<AggregatedSta
                 const state = JSON.parse(content) as PersistedSessionState
 
                 if (state?.stats?.totalPruneTokens && state?.prune) {
-                    const messages = state.prune.messages
-                    const blocks = Object.values(messages?.blocksById || {})
-                    const activeBlocks = blocks.filter((block) => block.active)
-                    const activeToolIds = new Set<string>(Object.keys(state.prune.tools || {}))
-                    for (const block of activeBlocks) {
-                        for (const toolId of block.effectiveToolIds || []) {
-                            activeToolIds.add(toolId)
-                        }
-                    }
+                    const compression =
+                        state.compression ||
+                        // LEGACY: Older session files do not have derived compression stats yet.
+                        // Keep this reconstruction path during migration, then delete it once old
+                        // persisted state is no longer relevant.
+                        derivePersistedCompressionStats(state.prune, state.stats)
 
-                    let activeDurationMs = 0
-                    const groupedDurations = new Map<number, number>()
-                    for (const block of activeBlocks) {
-                        if (block.mode === "message") {
-                            const current = groupedDurations.get(block.runId) || 0
-                            groupedDurations.set(
-                                block.runId,
-                                Math.max(current, block.durationMs || 0),
-                            )
-                            continue
-                        }
-
-                        activeDurationMs += block.durationMs || 0
-                    }
-
-                    for (const durationMs of groupedDurations.values()) {
-                        activeDurationMs += durationMs
-                    }
-
-                    result.totalTokens += state.stats.totalPruneTokens
-                    result.totalSummaryTokens += activeBlocks.reduce(
-                        (total, block) => total + (block.summaryTokens || 0),
-                        0,
-                    )
-                    result.totalDurationMs += activeDurationMs
-                    result.totalTools += activeToolIds.size
-                    result.totalMessages += Object.values(messages?.byMessageId || {}).reduce(
-                        (total, entry) => total + (entry.activeBlockIds?.length > 0 ? 1 : 0),
-                        0,
-                    )
+                    result.totalTokens += compression.inputTokens
+                    result.totalSummaryTokens += compression.summaryTokens
+                    result.totalDurationMs += compression.durationMs
+                    result.totalTools += compression.tools
+                    result.totalMessages += compression.messages
                     result.sessionCount++
                 }
             } catch {
