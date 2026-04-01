@@ -8,5 +8,6 @@
         "@opentui/core": "0.1.92",
         "@opentui/solid": "0.1.92",
         "solid-js": "1.9.11"
-    }
+    },
+    "version": "3.2.4-beta0"
 }

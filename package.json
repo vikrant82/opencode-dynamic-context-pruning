@@ -1,7 +1,7 @@
 {
     "$schema": "https://json.schemastore.org/package.json",
     "name": "@tarquinen/opencode-dcp",
-    "version": "3.2.3-beta0",
+    "version": "3.2.4-beta0",
     "type": "module",
     "description": "OpenCode plugin that optimizes token usage by pruning obsolete tool outputs from conversation context",
     "main": "./dist/index.js",
@@ -81,9 +81,11 @@
     "files": [
         "dist/",
         "lib/analysis/",
+        "lib/compress/",
         "lib/state/",
         "lib/config.ts",
         "lib/logger.ts",
+        "lib/message-ids.ts",
         "lib/messages/query.ts",
         "lib/token-utils.ts",
         "tui/data/",
