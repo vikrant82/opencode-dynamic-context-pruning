@@ -78,24 +78,6 @@
         "tsx": "^4.21.0",
         "typescript": "^6.0.2"
     },
-    "files": [
-        "dist/",
-        "lib/analysis/",
-        "lib/compress/",
-        "lib/state/",
-        "lib/config.ts",
-        "lib/logger.ts",
-        "lib/message-ids.ts",
-        "lib/messages/query.ts",
-        "lib/token-utils.ts",
-        "tui/data/",
-        "tui/routes/",
-        "tui/shared/",
-        "tui/slots/",
-        "tui/index.tsx",
-        "README.md",
-        "LICENSE"
-    ],
     "directories": {
         "doc": "docs",
         "lib": "lib",
