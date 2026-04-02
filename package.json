@@ -20,10 +20,6 @@
             "import": "./tui/index.tsx"
         }
     },
-    "oc-plugin": [
-        "server",
-        "tui"
-    ],
     "files": [
         "dist/",
         "index.ts",
@@ -71,16 +67,16 @@
     "author": "tarquinen",
     "license": "AGPL-3.0-or-later",
     "peerDependencies": {
-        "@opencode-ai/plugin": ">=1.4.3"
+        "@opencode-ai/plugin": ">=1.4.3",
+        "@opentui/core": ">=0.1.97",
+        "@opentui/solid": ">=0.1.97",
+        "solid-js": ">=1.9.10"
     },
     "dependencies": {
         "@anthropic-ai/tokenizer": "^0.0.4",
         "@opencode-ai/sdk": "^1.4.3",
-        "@opentui/core": "0.1.97",
-        "@opentui/solid": "0.1.97",
         "fuzzball": "^2.2.3",
         "jsonc-parser": "^3.3.1",
-        "solid-js": "1.9.11",
         "zod": "^4.3.6"
     },
     "devDependencies": {
