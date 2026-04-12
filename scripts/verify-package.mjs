@@ -27,7 +27,6 @@ const requiredTarballFiles = [
     "package.json",
     "dist/index.js",
     "dist/index.d.ts",
-    "dist/tui/index.js",
     "dist/tui/index.d.ts",
     "index.ts",
     "lib/config.ts",
