@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js"
+import { createTextAttributes } from "@opentui/core"
 import type { TuiSlotPlugin } from "@opencode-ai/plugin/tui"
 import { Logger } from "../../lib/logger"
 import {
@@ -12,8 +13,7 @@ import { getPalette, toneColor, type DcpColor, type DcpPalette } from "../shared
 import { LABEL, type DcpRouteNames } from "../shared/names"
 import type { DcpActiveBlockInfo, DcpMessageStatus, DcpTuiApi } from "../shared/types"
 
-const SINGLE_BORDER = { type: "single" } as any
-const DIM_TEXT = { dim: true } as any
+const DIM_ATTRIBUTES = createTextAttributes({ dim: true })
 
 const REFRESH_DEBOUNCE_MS = 100
 const MAX_TOPIC_LEN = 30
@@ -314,7 +314,8 @@ const SidebarContext = (props: {
             width="100%"
             flexDirection="column"
             backgroundColor={props.palette.surface}
-            border={SINGLE_BORDER}
+            border
+            borderStyle="single"
             borderColor={props.palette.accent}
             paddingTop={1}
             paddingBottom={1}
@@ -424,7 +425,7 @@ const SidebarContext = (props: {
                         {topicOverflow() > 0 ? (
                             <box flexDirection="row" width="100%" height={1}>
                                 <box flexGrow={1} flexShrink={1} height={1}>
-                                    <text {...DIM_TEXT} fg={props.palette.muted}>
+                                    <text attributes={DIM_ATTRIBUTES} fg={props.palette.muted}>
                                         {topicsExpanded()
                                             ? `showing all ${allBlocks().length} topics`
                                             : `... ${topicOverflow()} more topics`}

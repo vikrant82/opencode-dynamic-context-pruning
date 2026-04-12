@@ -1,11 +1,12 @@
 /** @jsxImportSource @opentui/solid */
 import { createMemo, createSignal, For, Show } from "solid-js"
+import { createTextAttributes } from "@opentui/core"
 import { useKeyboard } from "@opentui/solid"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { getPalette, type DcpPalette } from "../shared/theme"
 import { LABEL, NAMES } from "../shared/names"
 
-const SINGLE_BORDER = { type: "single" } as any
+const DIM_ATTRIBUTES = createTextAttributes({ dim: true })
 
 interface SummaryRouteParams {
     topic?: string
@@ -146,7 +147,8 @@ function SummaryScreen(props: { api: TuiPluginApi; params: SummaryRouteParams })
                 flexGrow={1}
                 width="100%"
                 marginTop={1}
-                border={SINGLE_BORDER}
+                border
+                borderStyle="single"
                 borderColor={palette().border}
                 padding={1}
                 flexDirection="column"
@@ -159,7 +161,7 @@ function SummaryScreen(props: { api: TuiPluginApi; params: SummaryRouteParams })
             </box>
 
             <box marginTop={1}>
-                <text {...({ dim: true } as any)} fg={palette().muted}>
+                <text attributes={DIM_ATTRIBUTES} fg={palette().muted}>
                     Press Escape to return
                 </text>
             </box>
