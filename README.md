@@ -1,7 +1,27 @@
-# Dynamic Context Pruning Plugin
+# Dynamic Context Pruning Plugin (Fork)
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/dansmolsky)
-[![npm version](https://img.shields.io/npm/v/@tarquinen/opencode-dcp.svg)](https://www.npmjs.com/package/@tarquinen/opencode-dcp)
+[![npm version](https://img.shields.io/npm/v/@vikrant82/opencode-dcp.svg)](https://www.npmjs.com/package/@vikrant82/opencode-dcp)
+
+> **This is a personal fork of [`@tarquinen/opencode-dcp`](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) with additional optimizations for aggressive context reduction.**
+
+## Fork Improvements
+
+### Stale Tool Pruning (`staleTools` strategy)
+Automatically prunes completed tool outputs after a configurable number of turns (default: 3). In the upstream plugin, only errored tool calls were pruned — completed tool outputs (often 75%+ of context) were never cleaned up. This strategy continuously marks old tool outputs for removal, significantly reducing context size between compression events.
+
+### Strategies Run in Hook Pipeline
+Upstream only runs pruning strategies (`purgeErrors`, `deduplicate`) during compress tool preparation. This fork runs all strategies on **every hook invocation**, so `state.prune.tools` is populated before `pruneToolOutputs` executes. Tool outputs are cleaned up immediately instead of waiting for the next compression event.
+
+### Configurable Summary Budget (`compress.summaryBudget`)
+Adds a character budget for compression summaries (default: 0 / disabled). When set, the compress tool prompt instructs the LLM to keep summaries within the budget, preventing oversized summaries that negate the savings from compression.
+
+### Smarter Nudge Thresholds (`compress.minSavingsThreshold`)
+Adds a minimum token savings threshold for compression nudges (default: 0 / disabled). When context is between min/max limits, the plugin estimates how many tokens are actually compressible. If below the threshold, the nudge is suppressed — avoiding wasteful compressions that destroy prompt cache for negligible savings.
+
+### Enhanced Debug Logging
+When `debug: true`, logs detailed metrics for stale tool pruning (token counts, tool names), summary budget compliance (over-budget warnings), nudge threshold decisions, and per-invocation session metrics.
+
+---
 
 Automatically reduces token usage in OpenCode by managing conversation context.
 
@@ -12,7 +32,7 @@ Automatically reduces token usage in OpenCode by managing conversation context.
 Install from the CLI:
 
 ```bash
-opencode plugin @tarquinen/opencode-dcp@latest --global
+opencode plugin @vikrant82/opencode-dcp@latest --global
 ```
 
 This installs the package and adds it to your global OpenCode config.
