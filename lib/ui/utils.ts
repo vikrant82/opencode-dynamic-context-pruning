@@ -1,6 +1,7 @@
 import { SessionState, ToolParameterEntry, WithParts } from "../state"
 import { countTokens } from "../token-utils"
 import { isIgnoredUserMessage } from "../messages/query"
+import { getActiveSummaryTokenUsage } from "../state/utils"
 
 function extractParameterKey(tool: string, parameters: any): string {
     if (!parameters) return ""
@@ -140,6 +141,50 @@ function extractParameterKey(tool: string, parameters: any): string {
 export function formatStatsHeader(totalTokensSaved: number, pruneTokenCounter: number): string {
     const totalTokensSavedStr = `~${formatTokenCount(totalTokensSaved + pruneTokenCounter)}`
     return [`▣ DCP | ${totalTokensSavedStr} saved total`].join("\n")
+}
+
+export interface SessionStatsSnapshot {
+    turn: number
+    activeBlocks: number
+    compressedMessages: number
+    toolsPruned: number
+    grossTokensSaved: number
+    summaryTokens: number
+    netTokensSaved: number
+    toolsCached: number
+}
+
+export function getSessionStatsSnapshot(state: SessionState): SessionStatsSnapshot {
+    let compressedMessages = 0
+    for (const [, entry] of state.prune.messages.byMessageId) {
+        if (entry.activeBlockIds.length > 0) {
+            compressedMessages++
+        }
+    }
+
+    const grossTokensSaved = state.stats.totalPruneTokens + state.stats.pruneTokenCounter
+    const summaryTokens = getActiveSummaryTokenUsage(state)
+    const netTokensSaved = Math.max(0, grossTokensSaved - summaryTokens)
+
+    return {
+        turn: state.currentTurn,
+        activeBlocks: state.prune.messages.activeBlockIds.size,
+        compressedMessages,
+        toolsPruned: state.prune.tools.size,
+        grossTokensSaved,
+        summaryTokens,
+        netTokensSaved,
+        toolsCached: state.toolParameters.size,
+    }
+}
+
+export function formatSessionStatsBlock(snapshot: SessionStatsSnapshot): string {
+    const lines: string[] = []
+    lines.push(`  Session (turn ${snapshot.turn}):`)
+    lines.push(`    ${snapshot.activeBlocks} compression blocks | ${snapshot.compressedMessages} messages compressed`)
+    lines.push(`    ${snapshot.toolsPruned} tools pruned out of ${snapshot.toolsCached} cached`)
+    lines.push(`    Gross savings: ~${formatTokenCount(snapshot.grossTokensSaved, true)} removed — ~${formatTokenCount(snapshot.summaryTokens, true)} summaries = net ~${formatTokenCount(snapshot.netTokensSaved, true)}`)
+    return lines.join("\n")
 }
 
 export function formatTokenCount(tokens: number, compact?: boolean): string {
