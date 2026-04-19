@@ -17,7 +17,7 @@ export const prune = (
     logger: Logger,
     config: PluginConfig,
     messages: WithParts[],
-): void => {
+): string[] => {
     // Run strategies to populate state.prune.tools before pruning
     deduplicate(state, logger, config, messages)
     purgeErrors(state, logger, config, messages)
@@ -25,9 +25,11 @@ export const prune = (
 
     filterCompressedRanges(state, logger, config, messages)
     // pruneFullTool(state, logger, messages)
-    pruneToolOutputs(state, logger, messages)
+    const prunedToolIds = pruneToolOutputs(state, logger, messages)
     pruneToolInputs(state, logger, messages)
     pruneToolErrors(state, logger, messages)
+
+    return prunedToolIds
 }
 
 const pruneFullTool = (state: SessionState, logger: Logger, messages: WithParts[]): void => {
@@ -76,7 +78,8 @@ const pruneFullTool = (state: SessionState, logger: Logger, messages: WithParts[
     }
 }
 
-const pruneToolOutputs = (state: SessionState, logger: Logger, messages: WithParts[]): void => {
+const pruneToolOutputs = (state: SessionState, logger: Logger, messages: WithParts[]): string[] => {
+    const prunedIds: string[] = []
     for (const msg of messages) {
         if (isMessageCompacted(state, msg)) {
             continue
@@ -97,9 +100,13 @@ const pruneToolOutputs = (state: SessionState, logger: Logger, messages: WithPar
                 continue
             }
 
+            if (part.state.output !== PRUNED_TOOL_OUTPUT_REPLACEMENT) {
+                prunedIds.push(part.callID)
+            }
             part.state.output = PRUNED_TOOL_OUTPUT_REPLACEMENT
         }
     }
+    return prunedIds
 }
 
 const pruneToolInputs = (state: SessionState, logger: Logger, messages: WithParts[]): void => {

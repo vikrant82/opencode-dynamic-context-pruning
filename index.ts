@@ -69,6 +69,7 @@ const server: Plugin = (async (ctx) => {
             config,
             prompts,
             hostPermissions,
+            ctx.directory,
         ) as any,
         "experimental.text.complete": createTextCompleteHandler(),
         "command.execute.before": createCommandExecuteHandler(
