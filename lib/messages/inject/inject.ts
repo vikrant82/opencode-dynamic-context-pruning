@@ -23,6 +23,7 @@ import {
     addAnchor,
     applyAnchoredNudges,
     countMessagesAfterIndex,
+    estimateCompressibleTokens,
     findLastNonIgnoredMessage,
     getIterationNudgeThreshold,
     getNudgeFrequency,
@@ -67,6 +68,19 @@ export const injectCompressNudges = (
         modelId,
         messages,
     )
+
+    // Skip nudges if estimated savings from compression would be negligible
+    const minSavings = config.compress.minSavingsThreshold
+    if (minSavings > 0 && overMinLimit && !overMaxLimit) {
+        const compressibleTokens = estimateCompressibleTokens(state, messages)
+        if (compressibleTokens < minSavings) {
+            logger.debug("Skipping compress nudge: savings below threshold", {
+                compressibleTokens,
+                minSavingsThreshold: minSavings,
+            })
+            return
+        }
+    }
 
     if (!overMinLimit) {
         const hadTurnAnchors = state.nudges.turnNudgeAnchors.size > 0

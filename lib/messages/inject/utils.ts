@@ -19,7 +19,7 @@ import {
     hasContent,
 } from "../utils"
 import { getLastUserMessage, isIgnoredUserMessage } from "../query"
-import { getCurrentTokenUsage } from "../../token-utils"
+import { getCurrentTokenUsage, countAllMessageTokens } from "../../token-utils"
 import { getActiveSummaryTokenUsage } from "../../state/utils"
 
 const MESSAGE_MODE_NUDGE_PRIORITY: MessagePriority = "high"
@@ -371,4 +371,50 @@ export function applyAnchoredNudges(
         prompts.iterationNudge,
         compressedBlockGuidance,
     )
+}
+
+/**
+ * Estimates the total tokens in messages that could potentially be compressed.
+ * Considers all non-ignored messages except the most recent few turns.
+ * Used to decide if a compression nudge is worth emitting.
+ */
+export function estimateCompressibleTokens(
+    state: SessionState,
+    messages: WithParts[],
+    recentTurnBuffer: number = 2,
+): number {
+    const lastUserIndex = messages.findLastIndex(
+        (m) => m.info.role === "user" && !isIgnoredUserMessage(m),
+    )
+    if (lastUserIndex < 0) return 0
+
+    // Find the start of "recent" messages (last N user turns)
+    let turnsSeen = 0
+    let recentStart = messages.length
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].info.role === "user" && !isIgnoredUserMessage(messages[i])) {
+            turnsSeen++
+            if (turnsSeen > recentTurnBuffer) {
+                recentStart = i + 1
+                break
+            }
+        }
+    }
+    if (turnsSeen <= recentTurnBuffer) {
+        recentStart = 0
+    }
+
+    let totalTokens = 0
+    for (let i = 0; i < recentStart; i++) {
+        const msg = messages[i]
+        if (isIgnoredUserMessage(msg)) continue
+
+        // Skip messages already in a compression block
+        const pruneEntry = state.prune.messages.byMessageId.get(msg.info.id)
+        if (pruneEntry && pruneEntry.activeBlockIds.length > 0) continue
+
+        totalTokens += countAllMessageTokens(msg)
+    }
+
+    return totalTokens
 }

@@ -149,6 +149,17 @@ export function createChatMessageTransformHandler(
         applyPendingManualTrigger(state, output.messages, logger)
         stripStaleMetadata(output.messages)
 
+        // Session metrics snapshot (debug only)
+        logger.debug("Session metrics", {
+            messageCount: output.messages.length,
+            turn: state.currentTurn,
+            prunedTools: state.prune.tools.size,
+            totalPruneTokens: state.stats.totalPruneTokens,
+            activeCompressionBlocks: state.prune.messages.activeBlockIds.size,
+            compressedMessages: state.prune.messages.byMessageId.size,
+            toolsCached: state.toolParameters.size,
+        })
+
         if (state.sessionId) {
             await logger.saveContext(state.sessionId, output.messages)
         }

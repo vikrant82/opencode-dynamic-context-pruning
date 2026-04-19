@@ -23,6 +23,13 @@ export const syncCompressionBlocks = (
     }
 
     const messageIds = new Set(messages.map((msg) => msg.info.id))
+
+    logger.debug("syncCompressionBlocks start", {
+        messageCount: messages.length,
+        messageIdCount: messageIds.size,
+        blocksCount: messagesState.blocksById.size,
+    })
+
     const previousActiveBlockIds = new Set<number>(
         Array.from(messagesState.blocksById.values())
             .filter((block) => block.active)
@@ -47,6 +54,10 @@ export const syncCompressionBlocks = (
             block.deactivatedAt = now
             block.deactivatedByBlockId = undefined
             missingOriginBlockIds.push(block.blockId)
+            logger.debug("syncCompressionBlocks: block deactivated (missing origin)", {
+                blockId: block.blockId,
+                compressMessageId: block.compressMessageId,
+            })
             continue
         }
 
@@ -121,4 +132,18 @@ export const syncCompressionBlocks = (
             reactivatedCount,
         })
     }
+
+    // Debug: final state after sync
+    let activeMessageCount = 0
+    for (const entry of messagesState.byMessageId.values()) {
+        if (entry.activeBlockIds.length > 0) {
+            activeMessageCount++
+        }
+    }
+    logger.debug("syncCompressionBlocks done", {
+        activeBlockIds: Array.from(messagesState.activeBlockIds),
+        activeByAnchorCount: messagesState.activeByAnchorMessageId.size,
+        messagesWithActiveBlocks: activeMessageCount,
+        totalByMessageId: messagesState.byMessageId.size,
+    })
 }
