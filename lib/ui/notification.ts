@@ -5,6 +5,8 @@ import {
     formatProgressBar,
     formatStatsHeader,
     formatTokenCount,
+    getSessionStatsSnapshot,
+    formatSessionStatsBlock,
 } from "./utils"
 import { ToolParameterEntry } from "../state"
 import { PluginConfig } from "../config"
@@ -24,12 +26,14 @@ interface CompressionNotificationEntry {
     summaryTokens: number
 }
 
-function buildMinimalMessage(state: SessionState, reason: PruneReason | undefined): string {
+function buildMinimalMessage(state: SessionState, reason: PruneReason | undefined, pruneToolIds: string[]): string {
     const reasonSuffix = reason ? ` — ${PRUNE_REASON_LABELS[reason]}` : ""
-    return (
-        formatStatsHeader(state.stats.totalPruneTokens, state.stats.pruneTokenCounter) +
-        reasonSuffix
-    )
+    const header = formatStatsHeader(state.stats.totalPruneTokens, state.stats.pruneTokenCounter)
+    const sessionStats = getSessionStatsSnapshot(state)
+    let message = header + reasonSuffix
+    message += `\n  This batch: ${pruneToolIds.length} tools pruned`
+    message += `\n\n${formatSessionStatsBlock(sessionStats)}`
+    return message
 }
 
 function buildDetailedMessage(
@@ -50,10 +54,13 @@ function buildDetailedMessage(
         message += "\n" + itemLines.join("\n")
     }
 
+    const sessionStats = getSessionStatsSnapshot(state)
+    message += `\n\n${formatSessionStatsBlock(sessionStats)}`
+
     return message.trim()
 }
 
-const TOAST_BODY_MAX_LINES = 12
+const TOAST_BODY_MAX_LINES = 18
 const TOAST_SUMMARY_MAX_CHARS = 600
 
 function truncateToastBody(body: string, maxLines: number = TOAST_BODY_MAX_LINES): string {
@@ -112,7 +119,7 @@ export async function sendUnifiedNotification(
 
     const message =
         config.pruneNotification === "minimal"
-            ? buildMinimalMessage(state, reason)
+            ? buildMinimalMessage(state, reason, pruneToolIds)
             : buildDetailedMessage(state, reason, pruneToolIds, toolMetadata, workingDirectory)
 
     if (config.pruneNotificationType === "toast") {
@@ -245,8 +252,31 @@ export async function sendCompressNotification(
     const totalGross = state.stats.totalPruneTokens + state.stats.pruneTokenCounter
     const notificationHeader = `▣ DCP | ${formatCompressionMetrics(totalGross, totalActiveSummaryTkns)}`
 
+    const sessionStats = getSessionStatsSnapshot(state)
+
+    const totalDurationMs = entries.reduce((total, entry) => {
+        const block = state.prune.messages.blocksById.get(entry.blockId)
+        return total + (block?.durationMs ?? 0)
+    }, 0)
+    const durationStr = totalDurationMs >= 1000
+        ? `${(totalDurationMs / 1000).toFixed(1)}s`
+        : `${totalDurationMs}ms`
+
+    const netTokens = Math.max(0, compressedTokens - summaryTokens)
+    const reductionPct = compressedTokens > 0
+        ? Math.round((netTokens / compressedTokens) * 100)
+        : 0
+
     if (config.pruneNotification === "minimal") {
         message = `${notificationHeader} — ${compressionLabel}`
+        message += `\n\n  This compression:`
+        message += `\n    -${formatTokenCount(compressedTokens, true)} removed → +${formatTokenCount(summaryTokens, true)} summary = net -${formatTokenCount(netTokens, true)} (${reductionPct}% reduction)`
+        message += `\n    ${newlyCompressedMessageIds.length} messages`
+        if (newlyCompressedToolIds.length > 0) {
+            message += `, ${newlyCompressedToolIds.length} tools`
+        }
+        message += ` | ${durationStr}`
+        message += `\n\n${formatSessionStatsBlock(sessionStats)}`
     } else {
         message = notificationHeader
 
@@ -263,16 +293,17 @@ export async function sendCompressNotification(
             50,
         )
         message += `\n\n${progressBar}`
-        message += `\n▣ ${compressionLabel} ${formatCompressionMetrics(compressedTokens, summaryTokens)}`
-        message += `\n→ Topic: ${topic}`
-        message += `\n→ Items: ${newlyCompressedMessageIds.length} messages`
+        message += `\n▣ ${compressionLabel} — "${topic}"`
+        message += `\n\n  This compression:`
+        message += `\n    -${formatTokenCount(compressedTokens, true)} removed → +${formatTokenCount(summaryTokens, true)} summary = net -${formatTokenCount(netTokens, true)} (${reductionPct}% reduction)`
+        message += `\n    ${newlyCompressedMessageIds.length} messages`
         if (newlyCompressedToolIds.length > 0) {
-            message += ` and ${newlyCompressedToolIds.length} tools compressed`
-        } else {
-            message += ` compressed`
+            message += `, ${newlyCompressedToolIds.length} tools`
         }
+        message += ` | ${durationStr}`
+        message += `\n\n${formatSessionStatsBlock(sessionStats)}`
         if (config.compress.showCompression) {
-            message += `\n→ Compression (~${summaryTokensStr}): ${summary}`
+            message += `\n\n  Summary (~${summaryTokensStr}):\n    ${summary}`
         }
     }
 
@@ -282,8 +313,8 @@ export async function sendCompressNotification(
             const truncatedSummary = truncateToastSummary(summary)
             if (truncatedSummary !== summary) {
                 toastMessage = toastMessage.replace(
-                    `\n→ Compression (~${summaryTokensStr}): ${summary}`,
-                    `\n→ Compression (~${summaryTokensStr}): ${truncatedSummary}`,
+                    `\n\n  Summary (~${summaryTokensStr}):\n    ${summary}`,
+                    `\n\n  Summary (~${summaryTokensStr}):\n    ${truncatedSummary}`,
                 )
             }
         }
