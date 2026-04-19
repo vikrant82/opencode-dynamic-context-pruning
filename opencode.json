@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "tasksync-serena": {
+      "type": "local",
+      "command": [
+        "serena",
+        "start-mcp-server",
+        "--context",
+        "ide-assistant",
+        "--project",
+        "dcp",
+        "/home/chauv/.config/opencode/tasksync-mcp/opencode-dynamic-context-pruning"
+      ],
+      "enabled": true
+    }
+  }
+}
