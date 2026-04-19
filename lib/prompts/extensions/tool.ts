@@ -33,3 +33,16 @@ THE FORMAT OF COMPRESS
   ]
 }
 \`\`\``
+
+/**
+ * Builds a summary budget instruction appended to the compress tool description.
+ * Returns empty string when budget is 0 (disabled) or negative.
+ */
+export function buildSummaryBudgetExtension(summaryBudget: number): string {
+    if (!summaryBudget || summaryBudget <= 0) {
+        return ""
+    }
+
+    return `\n\nSUMMARY SIZE BUDGET
+Each summary you write MUST stay within approximately ${summaryBudget} characters. Be concise: prioritize decisions, file paths, function signatures, and key findings. Omit verbose explanations, large code blocks, and step-by-step narratives. If the budget is tight, use bullet points and abbreviations.`
+}
