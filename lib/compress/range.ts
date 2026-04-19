@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import type { ToolContext } from "./types"
 import { countTokens } from "../token-utils"
-import { RANGE_FORMAT_EXTENSION } from "../prompts/extensions/tool"
+import { RANGE_FORMAT_EXTENSION, buildSummaryBudgetExtension } from "../prompts/extensions/tool"
 import { finalizeSession, prepareSession, type NotificationEntry } from "./pipeline"
 import {
     appendProtectedPromptInfo,
@@ -58,7 +58,7 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
     const runtimePrompts = ctx.prompts.getRuntimePrompts()
 
     return tool({
-        description: runtimePrompts.compressRange + RANGE_FORMAT_EXTENSION,
+        description: runtimePrompts.compressRange + RANGE_FORMAT_EXTENSION + buildSummaryBudgetExtension(ctx.config.compress.summaryBudget),
         args: buildSchema(),
         async execute(args, toolCtx) {
             const input = args as CompressRangeToolArgs

@@ -17,6 +17,8 @@ export interface CompressConfig {
     permission: Permission
     showCompression: boolean
     summaryBuffer: boolean
+    summaryBudget: number
+    minSavingsThreshold: number
     maxContextLimit: number | `${number}%`
     minContextLimit: number | `${number}%`
     modelMaxLimits?: Record<string, number | `${number}%`>
@@ -40,6 +42,12 @@ export interface ManualModeConfig {
 }
 
 export interface PurgeErrors {
+    enabled: boolean
+    turns: number
+    protectedTools: string[]
+}
+
+export interface StaleTools {
     enabled: boolean
     turns: number
     protectedTools: string[]
@@ -70,6 +78,7 @@ export interface PluginConfig {
     strategies: {
         deduplication: Deduplication
         purgeErrors: PurgeErrors
+        staleTools: StaleTools
     }
 }
 
@@ -86,6 +95,7 @@ const DEFAULT_PROTECTED_TOOLS = [
     "plan_exit",
     "write",
     "edit",
+    "get_feedback",
 ]
 
 const COMPRESS_DEFAULT_PROTECTED_TOOLS = ["task", "skill", "todowrite", "todoread"]
@@ -116,6 +126,8 @@ export const VALID_CONFIG_KEYS = new Set([
     "compress.permission",
     "compress.showCompression",
     "compress.summaryBuffer",
+    "compress.summaryBudget",
+    "compress.minSavingsThreshold",
     "compress.maxContextLimit",
     "compress.minContextLimit",
     "compress.modelMaxLimits",
@@ -134,6 +146,10 @@ export const VALID_CONFIG_KEYS = new Set([
     "strategies.purgeErrors.enabled",
     "strategies.purgeErrors.turns",
     "strategies.purgeErrors.protectedTools",
+    "strategies.staleTools",
+    "strategies.staleTools.enabled",
+    "strategies.staleTools.turns",
+    "strategies.staleTools.protectedTools",
 ])
 
 function getConfigKeyPaths(obj: Record<string, any>, prefix = ""): string[] {
@@ -375,6 +391,45 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
             }
 
             if (
+                compress.summaryBudget !== undefined &&
+                typeof compress.summaryBudget !== "number"
+            ) {
+                errors.push({
+                    key: "compress.summaryBudget",
+                    expected: "number",
+                    actual: typeof compress.summaryBudget,
+                })
+            }
+            if (typeof compress.summaryBudget === "number" && compress.summaryBudget < 0) {
+                errors.push({
+                    key: "compress.summaryBudget",
+                    expected: "non-negative number (>= 0, 0 = no limit)",
+                    actual: `${compress.summaryBudget}`,
+                })
+            }
+
+            if (
+                compress.minSavingsThreshold !== undefined &&
+                typeof compress.minSavingsThreshold !== "number"
+            ) {
+                errors.push({
+                    key: "compress.minSavingsThreshold",
+                    expected: "number",
+                    actual: typeof compress.minSavingsThreshold,
+                })
+            }
+            if (
+                typeof compress.minSavingsThreshold === "number" &&
+                compress.minSavingsThreshold < 0
+            ) {
+                errors.push({
+                    key: "compress.minSavingsThreshold",
+                    expected: "non-negative number (>= 0, 0 = disabled)",
+                    actual: `${compress.minSavingsThreshold}`,
+                })
+            }
+
+            if (
                 compress.nudgeFrequency !== undefined &&
                 typeof compress.nudgeFrequency !== "number"
             ) {
@@ -603,6 +658,50 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
                 })
             }
         }
+
+        if (strategies.staleTools) {
+            if (
+                strategies.staleTools.enabled !== undefined &&
+                typeof strategies.staleTools.enabled !== "boolean"
+            ) {
+                errors.push({
+                    key: "strategies.staleTools.enabled",
+                    expected: "boolean",
+                    actual: typeof strategies.staleTools.enabled,
+                })
+            }
+
+            if (
+                strategies.staleTools.turns !== undefined &&
+                typeof strategies.staleTools.turns !== "number"
+            ) {
+                errors.push({
+                    key: "strategies.staleTools.turns",
+                    expected: "number",
+                    actual: typeof strategies.staleTools.turns,
+                })
+            }
+            if (
+                typeof strategies.staleTools.turns === "number" &&
+                strategies.staleTools.turns < 1
+            ) {
+                errors.push({
+                    key: "strategies.staleTools.turns",
+                    expected: "positive number (>= 1)",
+                    actual: `${strategies.staleTools.turns} (will be clamped to 1)`,
+                })
+            }
+            if (
+                strategies.staleTools.protectedTools !== undefined &&
+                !Array.isArray(strategies.staleTools.protectedTools)
+            ) {
+                errors.push({
+                    key: "strategies.staleTools.protectedTools",
+                    expected: "string[]",
+                    actual: typeof strategies.staleTools.protectedTools,
+                })
+            }
+        }
     }
 
     return errors
@@ -681,6 +780,8 @@ const defaultConfig: PluginConfig = {
         permission: "allow",
         showCompression: false,
         summaryBuffer: true,
+        summaryBudget: 0,
+        minSavingsThreshold: 0,
         maxContextLimit: 100000,
         minContextLimit: 50000,
         nudgeFrequency: 5,
@@ -698,6 +799,11 @@ const defaultConfig: PluginConfig = {
         purgeErrors: {
             enabled: true,
             turns: 4,
+            protectedTools: [],
+        },
+        staleTools: {
+            enabled: true,
+            turns: 3,
             protectedTools: [],
         },
     },
@@ -829,6 +935,16 @@ function mergeStrategies(
                 ]),
             ],
         },
+        staleTools: {
+            enabled: override.staleTools?.enabled ?? base.staleTools.enabled,
+            turns: override.staleTools?.turns ?? base.staleTools.turns,
+            protectedTools: [
+                ...new Set([
+                    ...base.staleTools.protectedTools,
+                    ...(override.staleTools?.protectedTools ?? []),
+                ]),
+            ],
+        },
     }
 }
 
@@ -845,6 +961,8 @@ function mergeCompress(
         permission: override.permission ?? base.permission,
         showCompression: override.showCompression ?? base.showCompression,
         summaryBuffer: override.summaryBuffer ?? base.summaryBuffer,
+        summaryBudget: override.summaryBudget ?? base.summaryBudget,
+        minSavingsThreshold: override.minSavingsThreshold ?? base.minSavingsThreshold,
         maxContextLimit: override.maxContextLimit ?? base.maxContextLimit,
         minContextLimit: override.minContextLimit ?? base.minContextLimit,
         modelMaxLimits: override.modelMaxLimits ?? base.modelMaxLimits,
@@ -924,6 +1042,10 @@ function deepCloneConfig(config: PluginConfig): PluginConfig {
             purgeErrors: {
                 ...config.strategies.purgeErrors,
                 protectedTools: [...config.strategies.purgeErrors.protectedTools],
+            },
+            staleTools: {
+                ...config.strategies.staleTools,
+                protectedTools: [...config.strategies.staleTools.protectedTools],
             },
         },
     }

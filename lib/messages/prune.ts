@@ -5,6 +5,7 @@ import { isMessageCompacted } from "../state/utils"
 import { createSyntheticUserMessage, replaceBlockIdsWithBlocked } from "./utils"
 import { getLastUserMessage } from "./query"
 import type { UserMessage } from "@opencode-ai/sdk/v2"
+import { deduplicate, purgeErrors, staleTools } from "../strategies"
 
 const PRUNED_TOOL_OUTPUT_REPLACEMENT =
     "[Output removed to save context - information superseded or no longer needed]"
@@ -17,6 +18,11 @@ export const prune = (
     config: PluginConfig,
     messages: WithParts[],
 ): void => {
+    // Run strategies to populate state.prune.tools before pruning
+    deduplicate(state, logger, config, messages)
+    purgeErrors(state, logger, config, messages)
+    staleTools(state, logger, config, messages)
+
     filterCompressedRanges(state, logger, config, messages)
     // pruneFullTool(state, logger, messages)
     pruneToolOutputs(state, logger, messages)
@@ -171,6 +177,9 @@ const filterCompressedRanges = (
 
     const result: WithParts[] = []
 
+    let skippedCount = 0
+    let includedCount = 0
+
     for (const msg of messages) {
         const msgId = msg.info.id
 
@@ -209,6 +218,17 @@ const filterCompressedRanges = (
                         anchorMessageId: msgId,
                         summaryLength: summaryContent.length,
                     })
+                    const budgetLimit = config.compress.summaryBudget
+                    if (budgetLimit > 0) {
+                        logger.debug("Summary budget check", {
+                            summaryChars: summaryContent.length,
+                            budgetChars: budgetLimit,
+                            overBudget: summaryContent.length > budgetLimit,
+                            overagePercent: summaryContent.length > budgetLimit
+                                ? Math.round(((summaryContent.length - budgetLimit) / budgetLimit) * 100)
+                                : 0,
+                        })
+                    }
                 } else {
                     logger.warn("No user message found for compress summary", {
                         anchorMessageId: msgId,
@@ -220,12 +240,20 @@ const filterCompressedRanges = (
         // Skip messages that are in the prune list
         const pruneEntry = state.prune.messages.byMessageId.get(msgId)
         if (pruneEntry && pruneEntry.activeBlockIds.length > 0) {
+            skippedCount++
             continue
         }
 
         // Normal message, include it
+        includedCount++
         result.push(msg)
     }
+
+    logger.debug("filterCompressedRanges", {
+        skippedCount,
+        includedCount,
+        resultSize: result.length,
+    })
 
     // Replace messages array contents
     messages.length = 0
