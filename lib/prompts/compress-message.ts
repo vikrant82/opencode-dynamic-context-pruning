@@ -10,6 +10,11 @@ Directly quote short user instructions when that best preserves exact meaning.
 Yet be LEAN. Strip away the noise: failed attempts that led nowhere, verbose tool output, and repetition. What remains should be pure signal - golden nuggets of detail that preserve full understanding with zero ambiguity.
 If a message contains no significant technical decisions, code changes, or user requirements, produce a minimal one-line summary rather than a detailed one.
 
+TOOL CONTENT
+Do not copy raw tool payloads, skill contents, task results, or todo lists verbatim into the summary.
+For workflow tools, preserve only the materially relevant outcome, decision, or state change.
+For \`get_feedback\` and \`check_interrupts\`, preserve the user-authored request, approval, correction, or constraint as user intent.
+
 MESSAGE IDS
 You specify individual raw messages by ID using the injected IDs visible in the conversation:
 
