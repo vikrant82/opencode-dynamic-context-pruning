@@ -51,13 +51,57 @@ Automatically reduces token usage in OpenCode by managing conversation context.
 
 ## Installation
 
-Install from the CLI:
+### Prerequisites
+
+**Bun is required.** OpenCode uses Bun to install npm plugins at startup. If Bun is not installed, the plugin install will silently fail.
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+### Install
+
+From the CLI:
 
 ```bash
 opencode plugin @vikrant82/opencode-dcp@latest --global
 ```
 
-This installs the package and adds it to your global OpenCode config.
+Or manually add to your `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "plugin": ["@vikrant82/opencode-dcp"]
+}
+```
+
+Then restart OpenCode. The plugin is cached in `~/.cache/opencode/packages/`.
+
+### Verify
+
+After restarting, check the DCP log to confirm the plugin loaded:
+
+```bash
+grep "DCP initialized" ~/.config/opencode/logs/dcp/daily/$(date +%Y-%m-%d).log
+# Expected: INFO DCP initialized | version=3.3.2 | strategies={...}
+```
+
+### Troubleshooting
+
+If no DCP log appears after restart, check the OpenCode system log for errors:
+
+```bash
+# Find the latest log
+ls -lt ~/.local/share/opencode/log/ | head -2
+
+# Search for plugin errors
+grep -i "vikrant82\|dcp\|failed" ~/.local/share/opencode/log/<latest>.log
+```
+
+Common issues:
+- **`ENOENT ... failed to resolve plugin server entry`** — Bun/npm install failed. Clear cache and retry: `rm -rf ~/.cache/opencode/packages/@vikrant82`
+- **No plugin lines at all** — Check that `@vikrant82/opencode-dcp` is in the `plugin` array in `opencode.json`
+- **Plugin loaded but wrong version** — Clear cache: `rm -rf ~/.cache/opencode/packages/@vikrant82` and restart
 
 ## How It Works
 
