@@ -18,6 +18,12 @@ import {
 } from "./lib/hooks"
 import { configureClientAuth, isSecureMode } from "./lib/auth"
 import { startAutoUpdate } from "./lib/update"
+import { createRequire } from "module"
+
+const require = createRequire(import.meta.url)
+const pkg = require("./package.json")
+
+const id = "opencode-dynamic-context-pruning"
 
 const server: Plugin = (async (ctx) => {
     const config = getConfig(ctx)
@@ -40,6 +46,7 @@ const server: Plugin = (async (ctx) => {
     }
 
     logger.info("DCP initialized", {
+        version: pkg.version,
         strategies: config.strategies,
     })
 
