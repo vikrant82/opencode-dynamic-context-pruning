@@ -9,14 +9,36 @@
 ### Stale Tool Pruning (`staleTools` strategy)
 Automatically prunes completed tool outputs after a configurable number of turns (default: 3). In the upstream plugin, only errored tool calls were pruned — completed tool outputs (often 75%+ of context) were never cleaned up. This strategy continuously marks old tool outputs for removal, significantly reducing context size between compression events.
 
+```jsonc
+"strategies": {
+    "staleTools": {
+        "enabled": true,       // Enable stale tool pruning
+        "turns": 3,            // Prune completed tools older than N turns
+        "protectedTools": []   // Additional tools to protect (added to defaults)
+    }
+}
+```
+
 ### Strategies Run in Hook Pipeline
 Upstream only runs pruning strategies (`purgeErrors`, `deduplicate`) during compress tool preparation. This fork runs all strategies on **every hook invocation**, so `state.prune.tools` is populated before `pruneToolOutputs` executes. Tool outputs are cleaned up immediately instead of waiting for the next compression event.
 
 ### Configurable Summary Budget (`compress.summaryBudget`)
 Adds a character budget for compression summaries (default: 0 / disabled). When set, the compress tool prompt instructs the LLM to keep summaries within the budget, preventing oversized summaries that negate the savings from compression.
 
+```jsonc
+"compress": {
+    "summaryBudget": 2000    // Max chars per summary (0 = disabled)
+}
+```
+
 ### Smarter Nudge Thresholds (`compress.minSavingsThreshold`)
 Adds a minimum token savings threshold for compression nudges (default: 0 / disabled). When context is between min/max limits, the plugin estimates how many tokens are actually compressible. If below the threshold, the nudge is suppressed — avoiding wasteful compressions that destroy prompt cache for negligible savings.
+
+```jsonc
+"compress": {
+    "minSavingsThreshold": 5000    // Min estimated token savings to nudge (0 = disabled)
+}
+```
 
 ### Enhanced Debug Logging
 When `debug: true`, logs detailed metrics for stale tool pruning (token counts, tool names), summary budget compliance (over-budget warnings), nudge threshold decisions, and per-invocation session metrics.
@@ -131,6 +153,14 @@ Each level overrides the previous, so project settings take priority over global
         "showCompression": false,
         // Let active summary tokens extend the effective maxContextLimit
         "summaryBuffer": true,
+        // [FORK] Max characters for compression summaries (0 = disabled).
+        // When set, the compress tool prompt instructs the LLM to keep
+        // summaries within this budget.
+        "summaryBudget": 0,
+        // [FORK] Minimum estimated compressible tokens to trigger a nudge
+        // (0 = disabled). When context is between min/max limits and
+        // estimated savings are below this, the nudge is suppressed.
+        "minSavingsThreshold": 0,
         // Soft upper threshold: above this, DCP keeps injecting strong
         // compression nudges (based on nudgeFrequency), so compression is
         // much more likely. Accepts: number or "X%" of model context window.
@@ -169,6 +199,14 @@ Each level overrides the previous, so project settings take priority over global
     },
     // Automatic pruning strategies
     "strategies": {
+        // [FORK] Prune completed tool outputs after N turns
+        "staleTools": {
+            "enabled": true,
+            // Number of turns before completed tool outputs are pruned
+            "turns": 3,
+            // Additional tools to protect from pruning
+            "protectedTools": [],
+        },
         // Remove duplicate tool calls (same tool with same arguments)
         "deduplication": {
             "enabled": true,
@@ -224,7 +262,7 @@ To reset an override, delete the matching file from your overrides directory.
 ### Protected Tools
 
 By default, these tools are always protected from pruning:
-`task`, `skill`, `todowrite`, `todoread`, `compress`, `batch`, `plan_enter`, `plan_exit`, `write`, `edit`
+`task`, `skill`, `todowrite`, `todoread`, `compress`, `batch`, `plan_enter`, `plan_exit`, `write`, `edit`, `get_feedback`
 
 The `protectedTools` arrays in `commands` and `strategies` add to this default list.
 
