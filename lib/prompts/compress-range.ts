@@ -9,6 +9,11 @@ Directly quote user messages when they are short enough to include safely. Direc
 
 Yet be LEAN. Strip away the noise: failed attempts that led nowhere, verbose tool outputs, back-and-forth exploration. What remains should be pure signal - golden nuggets of detail that preserve full understanding with zero ambiguity.
 
+TOOL CONTENT
+Do not copy raw tool payloads, skill contents, task results, or todo lists verbatim into the summary.
+For workflow tools, preserve only the materially relevant outcome, decision, or state change.
+For \`get_feedback\` and \`check_interrupts\`, preserve the user-authored request, approval, correction, or constraint as user intent.
+
 COMPRESSED BLOCK PLACEHOLDERS
 When the selected range includes previously compressed blocks, use this exact placeholder format when referencing one:
 
