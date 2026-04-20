@@ -249,6 +249,7 @@ Each level overrides the previous, so project settings take priority over global
             // Number of turns before completed tool outputs are pruned
             "turns": 3,
             // Additional tools to protect from pruning
+            // (`skill` is already protected by default)
             "protectedTools": [],
         },
         // Remove duplicate tool calls (same tool with same arguments)

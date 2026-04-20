@@ -786,7 +786,7 @@ const defaultConfig: PluginConfig = {
         staleTools: {
             enabled: true,
             turns: 3,
-            protectedTools: [],
+            protectedTools: ["skill"],
         },
     },
 }

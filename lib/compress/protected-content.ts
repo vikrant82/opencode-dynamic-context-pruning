@@ -13,6 +13,26 @@ import {
 import { fetchSessionMessages } from "./search"
 import type { SearchContext, SelectionResolution } from "./types"
 
+const WORKFLOW_TOOL_SUMMARIES: Record<string, string> = {
+    skill: "Loaded skill instructions for the current session.",
+    todowrite: "Updated the session todo list.",
+    todoread: "Read the current session todo list.",
+}
+
+function summarizeProtectedToolOutput(
+    toolName: string,
+    output: string,
+    allowSubAgents: boolean,
+): string {
+    if (toolName === "task") {
+        return allowSubAgents && output
+            ? "Completed a subagent task; preserve its outcome briefly rather than copying the raw payload."
+            : "Completed a subagent task."
+    }
+
+    return WORKFLOW_TOOL_SUMMARIES[toolName] ?? output
+}
+
 export function appendProtectedUserMessages(
     summary: string,
     selection: SelectionResolution,
@@ -136,6 +156,8 @@ export async function appendProtectedTools(
                             }
                         }
                     }
+
+                    output = summarizeProtectedToolOutput(part.tool, output, allowSubAgents)
 
                     if (output) {
                         protectedOutputs.push(`\n### ${title}\n${output}`)

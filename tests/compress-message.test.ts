@@ -223,7 +223,98 @@ test("compress message mode batches individual message summaries", async () => {
         /The following protected tools were used in this conversation as well:/,
     )
     assert.match(blocks[1]?.summary || "", /Tool: task/)
-    assert.match(blocks[1]?.summary || "", /task output body/)
+    assert.doesNotMatch(blocks[1]?.summary || "", /task output body/)
+    assert.match(
+        blocks[1]?.summary || "",
+        /Completed a subagent task\./,
+    )
+})
+
+test("compress message mode summarizes skill payloads without copying raw content", async () => {
+    const sessionID = `ses_message_compress_skill_${Date.now()}`
+    const rawMessages: WithParts[] = [
+        {
+            info: {
+                id: "msg-user-1",
+                role: "user",
+                sessionID,
+                agent: "assistant",
+                model: {
+                    providerID: "anthropic",
+                    modelID: "claude-test",
+                },
+                time: { created: 1 },
+            } as WithParts["info"],
+            parts: [textPart("msg-user-1", sessionID, "part-1", "Load the session skill")],
+        },
+        {
+            info: {
+                id: "msg-assistant-1",
+                role: "assistant",
+                sessionID,
+                agent: "assistant",
+                time: { created: 2 },
+            } as WithParts["info"],
+            parts: [
+                textPart("msg-assistant-1", sessionID, "part-2", "Loaded the requested skill"),
+                toolPart(
+                    "msg-assistant-1",
+                    sessionID,
+                    "call-skill-1",
+                    "skill",
+                    "<skill_content name=\"start-session\">Very long raw skill body</skill_content>",
+                ),
+            ],
+        },
+    ]
+
+    const state = createSessionState()
+    const logger = new Logger(false)
+    const config = buildConfig()
+    config.compress.protectedTools = ["skill"]
+
+    const tool = createCompressMessageTool({
+        client: {
+            session: {
+                messages: async () => ({ data: rawMessages }),
+                get: async () => ({ data: { parentID: null } }),
+            },
+        },
+        state,
+        logger,
+        config,
+        prompts: {
+            reload() {},
+            getRuntimePrompts() {
+                return { compressMessage: "", compressRange: "" }
+            },
+        },
+    } as any)
+
+    await tool.execute(
+        {
+            topic: "Skill note",
+            content: [
+                {
+                    messageId: "m0002",
+                    topic: "Skill load",
+                    summary: "Captured the loaded skill state.",
+                },
+            ],
+        },
+        {
+            ask: async () => {},
+            metadata: () => {},
+            sessionID,
+            messageID: "msg-compress-message-skill",
+        },
+    )
+
+    const block = Array.from(state.prune.messages.blocksById.values())[0]
+    assert.match(block?.summary || "", /Tool: skill/)
+    assert.match(block?.summary || "", /Loaded skill instructions for the current session\./)
+    assert.doesNotMatch(block?.summary || "", /<skill_content/)
+    assert.doesNotMatch(block?.summary || "", /Very long raw skill body/)
 })
 
 test("compress message mode stores call id for later duration attachment", async () => {
