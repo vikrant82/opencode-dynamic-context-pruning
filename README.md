@@ -17,6 +17,17 @@ opencode plugin @tarquinen/opencode-dcp@latest --global
 
 This installs the package and adds it to your global OpenCode config.
 
+## Project Status
+
+Development on DCP has slowed because most new context-management work has moved to [Sleev](https://sleev.ai) and the `sleev` CLI. Sleev is a local proxy for Claude Code, Codex, and OpenCode that builds on DCP's core ideas with newer, broader context-management features and will work with any harness/client.
+
+DCP remains available for OpenCode plugin users, but new features are landing in Sleev first. If you are starting fresh, we recommend trying Sleev:
+
+```bash
+npm i -g sleev
+sleev
+```
+
 ## How It Works
 
 DCP reduces context size through a compress tool and automatic cleanup. Your session history is never modified — DCP replaces pruned content with placeholders before sending requests to your LLM.
@@ -176,16 +187,10 @@ Each level overrides the previous, so project settings take priority over global
 
 ### Commands
 
-DCP provides a `/dcp` slash command:
+DCP provides a TUI panel and one prompt-producing slash command:
 
-- `/dcp` — Shows available DCP commands
-- `/dcp context` — Shows a breakdown of your current session's token usage by category (system, user, assistant, tools, etc.) and how much has been saved through pruning.
-- `/dcp stats` — Shows cumulative pruning statistics across all sessions.
-- `/dcp sweep` — Prunes all tools since the last user message. Accepts an optional count: `/dcp sweep 10` prunes the last 10 tools. Respects `commands.protectedTools`.
-- `/dcp manual [on|off]` — Toggle manual mode or set explicit state. When on, the AI will not autonomously use context management tools.
-- `/dcp compress [focus]` — Trigger a single compress tool execution. Optional focus text directs what content to compress, following the active `compress.mode`.
-- `/dcp decompress <n>` — Restore a specific active compression by ID (for example `/dcp decompress 2`). Running without an argument shows available compression IDs, token sizes, and topics.
-- `/dcp recompress <n>` — Re-apply a user-decompressed compression by ID (for example `/dcp recompress 2`). Running without an argument shows recompressible IDs, token sizes, and topics.
+- `/dcp` — Opens the DCP panel with context, stats, and manual-mode controls.
+- `/dcp-compress [focus]` — Asks the model to run one compression pass. Optional focus text directs what content to compress, following the active `compress.mode`.
 
 ### Prompt Overrides
 
