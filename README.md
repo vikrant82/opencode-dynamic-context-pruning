@@ -6,6 +6,25 @@
 
 ## Fork Improvements
 
+### On-Demand Pruning (`/dcp prune` & `/dcp unprune`)
+
+Adds deliberate, LLM-free context cleanup: `/dcp prune` marks completed and
+errored tool outputs older than N LLM steps for removal, without waiting for
+automatic strategies or the next compression. Supports `--dry-run` previews
+with estimated token savings and explicit `--tools` glob selection that
+overrides the default protections; `/dcp unprune` reverts the last prune batch
+(`--all` reverts everything). Placeholders land on the next request; stored
+session history is never touched.
+
+```
+/dcp prune --older-than 150 --dry-run   # preview candidates + estimated savings
+/dcp prune --older-than 150             # prune; recorded as an undoable batch
+/dcp unprune [--all]                    # revert the last batch (or all batches)
+```
+
+See [On-demand pruning (no LLM)](#on-demand-pruning-no-llm) under Commands for
+full syntax and edge cases.
+
 ### Stale Tool Pruning (`staleTools` strategy)
 
 Automatically prunes completed tool outputs after a configurable number of turns (default: 3). In the upstream plugin, only errored tool calls were pruned — completed tool outputs (often 75%+ of context) were never cleaned up. This strategy continuously marks old tool outputs for removal, significantly reducing context size between compression events.
