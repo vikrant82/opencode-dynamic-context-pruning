@@ -97,7 +97,9 @@ const pruneToolOutputs = (state: SessionState, logger: Logger, messages: WithPar
                 continue
             }
             if (part.tool === "question" || part.tool === "edit" || part.tool === "write") {
-                continue
+                if (!state.prune.explicitTools.has(part.callID)) {
+                    continue
+                }
             }
 
             if (part.state.output !== PRUNED_TOOL_OUTPUT_REPLACEMENT) {
