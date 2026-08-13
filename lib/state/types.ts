@@ -68,9 +68,19 @@ export interface PruneMessagesState {
     nextRunId: number
 }
 
+export interface ManualPruneBatch {
+    id: number
+    at: string
+    selector: string
+    toolIds: string[]
+    estTokens: number
+}
+
 export interface Prune {
     tools: Map<string, number>
     messages: PruneMessagesState
+    explicitTools: Set<string>
+    batches: ManualPruneBatch[]
 }
 
 export interface PendingManualTrigger {
