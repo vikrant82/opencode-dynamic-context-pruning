@@ -102,6 +102,10 @@ const server: Plugin = (async (ctx) => {
 
             if (config.commands.enabled && config.compress.permission !== "deny") {
                 opencodeConfig.command ??= {}
+                opencodeConfig.command["dcp"] = {
+                    template: "",
+                    description: "Show available DCP commands",
+                }
                 opencodeConfig.command["dcp-compress"] = {
                     template: "",
                     description: "Trigger DCP manual compression with: /dcp-compress [focus]",
