@@ -344,3 +344,60 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         selector,
     })
 }
+
+const UNPRUNE_USAGE = "Usage: /dcp unprune [--all]"
+
+export async function handleUnpruneCommand(ctx: UnpruneCommandContext): Promise<void> {
+    const { client, state, logger, sessionId, messages, args } = ctx
+    const params = getCurrentParams(state, messages, logger)
+    const unknown = args.find((a) => a !== "--all")
+    if (unknown) {
+        await sendIgnoredMessage(
+            client,
+            sessionId,
+            `Unknown option: ${unknown}\n\n${UNPRUNE_USAGE}`,
+            params,
+            logger,
+        )
+        return
+    }
+    if (state.prune.batches.length === 0) {
+        await sendIgnoredMessage(client, sessionId, "No manual prunes to revert.", params, logger)
+        return
+    }
+    const all = args.includes("--all")
+    const batches = all
+        ? [...state.prune.batches]
+        : [state.prune.batches[state.prune.batches.length - 1]]
+    let restored = 0
+    let restoredTokens = 0
+    for (const batch of batches) {
+        for (const id of batch.toolIds) {
+            const tokens = state.prune.tools.get(id)
+            if (state.prune.tools.delete(id)) {
+                state.prune.explicitTools.delete(id)
+                restored++
+                restoredTokens += tokens ?? 0
+            }
+        }
+    }
+    state.prune.batches = all ? [] : state.prune.batches.slice(0, -1)
+    state.stats.totalPruneTokens = Math.max(0, state.stats.totalPruneTokens - restoredTokens)
+    try {
+        await saveSessionState(state, logger)
+    } catch (err: any) {
+        logger.error("Failed to persist state after unprune", { error: err?.message })
+    }
+    const lines = boxLines("                     DCP Unprune")
+    if (all) {
+        lines.push(
+            `Restored ${restored} tool(s) from ${batches.length} batch(es) (~${restoredTokens.toLocaleString()} tokens return on next request)`,
+        )
+    } else {
+        lines.push(
+            `Restored ${restored} tool(s) from batch #${batches[0].id} (~${restoredTokens.toLocaleString()} tokens return on next request) · ${state.prune.batches.length} batch(es) remain`,
+        )
+    }
+    await sendIgnoredMessage(client, sessionId, lines.join("\n"), params, logger)
+    logger.info("Unprune command completed", { restored, restoredTokens, all })
+}
