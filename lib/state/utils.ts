@@ -332,6 +332,8 @@ export function resetOnCompaction(state: SessionState): void {
     state.toolParameters.clear()
     state.prune.tools = new Map<string, number>()
     state.prune.messages = createPruneMessagesState()
+    state.prune.explicitTools = new Set<string>()
+    state.prune.batches = []
     state.messageIds = {
         byRawId: new Map<string, string>(),
         byRef: new Map<string, string>(),

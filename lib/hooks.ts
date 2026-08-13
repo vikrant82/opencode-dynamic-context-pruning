@@ -30,9 +30,11 @@ import {
     handleHelpCommand,
     handleManualToggleCommand,
     handleManualTriggerCommand,
+    handlePruneCommand,
     handleRecompressCommand,
     handleStatsCommand,
     handleSweepCommand,
+    handleUnpruneCommand,
 } from "./commands"
 import { type HostPermissionSnapshot } from "./host-permissions"
 import { compressPermission, syncCompressPermissionState } from "./compress-permission"
@@ -237,12 +239,12 @@ export function createCommandExecuteHandler(
 
             if (subcommand === "context") {
                 await handleContextCommand(commandCtx)
-                return
+                throw new Error("__DCP_CONTEXT_HANDLED__")
             }
 
             if (subcommand === "stats") {
                 await handleStatsCommand(commandCtx)
-                return
+                throw new Error("__DCP_STATS_HANDLED__")
             }
 
             if (subcommand === "sweep") {
@@ -251,12 +253,28 @@ export function createCommandExecuteHandler(
                     args: subArgs,
                     workingDirectory,
                 })
-                return
+                throw new Error("__DCP_SWEEP_HANDLED__")
+            }
+
+            if (subcommand === "prune") {
+                await handlePruneCommand({
+                    ...commandCtx,
+                    args: subArgs,
+                    workingDirectory,
+                })
+                throw new Error("__DCP_PRUNE_HANDLED__")
+            }
+            if (subcommand === "unprune") {
+                await handleUnpruneCommand({
+                    ...commandCtx,
+                    args: subArgs,
+                })
+                throw new Error("__DCP_UNPRUNE_HANDLED__")
             }
 
             if (subcommand === "manual") {
                 await handleManualToggleCommand(commandCtx, subArgs[0]?.toLowerCase())
-                return
+                throw new Error("__DCP_MANUAL_HANDLED__")
             }
 
             if (subcommand === "compress") {
@@ -291,7 +309,7 @@ export function createCommandExecuteHandler(
                     ...commandCtx,
                     args: subArgs,
                 })
-                return
+                throw new Error("__DCP_DECOMPRESS_HANDLED__")
             }
 
             if (subcommand === "recompress") {
@@ -299,11 +317,11 @@ export function createCommandExecuteHandler(
                     ...commandCtx,
                     args: subArgs,
                 })
-                return
+                throw new Error("__DCP_RECOMPRESS_HANDLED__")
             }
 
             await handleHelpCommand(commandCtx)
-            return
+            throw new Error("__DCP_HELP_HANDLED__")
         }
     }
 }
