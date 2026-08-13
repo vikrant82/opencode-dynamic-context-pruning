@@ -7,6 +7,7 @@
 ## Fork Improvements
 
 ### Stale Tool Pruning (`staleTools` strategy)
+
 Automatically prunes completed tool outputs after a configurable number of turns (default: 3). In the upstream plugin, only errored tool calls were pruned — completed tool outputs (often 75%+ of context) were never cleaned up. This strategy continuously marks old tool outputs for removal, significantly reducing context size between compression events.
 
 ```jsonc
@@ -20,9 +21,11 @@ Automatically prunes completed tool outputs after a configurable number of turns
 ```
 
 ### Strategies Run in Hook Pipeline
+
 Upstream only runs pruning strategies (`purgeErrors`, `deduplicate`) during compress tool preparation. This fork runs all strategies on **every hook invocation**, so `state.prune.tools` is populated before `pruneToolOutputs` executes. Tool outputs are cleaned up immediately instead of waiting for the next compression event.
 
 ### Configurable Summary Budget (`compress.summaryBudget`)
+
 Adds a character budget for compression summaries (default: 0 / disabled). When set, the compress tool prompt instructs the LLM to keep summaries within the budget, preventing oversized summaries that negate the savings from compression.
 
 ```jsonc
@@ -32,6 +35,7 @@ Adds a character budget for compression summaries (default: 0 / disabled). When 
 ```
 
 ### Smarter Nudge Thresholds (`compress.minSavingsThreshold`)
+
 Adds a minimum token savings threshold for compression nudges (default: 0 / disabled). When context is between min/max limits, the plugin estimates how many tokens are actually compressible. If below the threshold, the nudge is suppressed — avoiding wasteful compressions that destroy prompt cache for negligible savings.
 
 ```jsonc
@@ -41,6 +45,7 @@ Adds a minimum token savings threshold for compression nudges (default: 0 / disa
 ```
 
 ### Enhanced Debug Logging
+
 When `debug: true`, logs detailed metrics for stale tool pruning (token counts, tool names), summary budget compliance (over-budget warnings), nudge threshold decisions, and per-invocation session metrics.
 
 ---
@@ -71,7 +76,7 @@ Or manually add to your `~/.config/opencode/opencode.json`:
 
 ```json
 {
-  "plugin": ["@vikrant82/opencode-dcp"]
+    "plugin": ["@vikrant82/opencode-dcp"]
 }
 ```
 
@@ -99,6 +104,7 @@ grep -i "vikrant82\|dcp\|failed" ~/.local/share/opencode/log/<latest>.log
 ```
 
 Common issues:
+
 - **`ENOENT ... failed to resolve plugin server entry`** — Bun/npm install failed. Clear cache and retry: `rm -rf ~/.cache/opencode/packages/@vikrant82`
 - **No plugin lines at all** — Check that `@vikrant82/opencode-dcp` is in the `plugin` array in `opencode.json`
 - **Plugin loaded but wrong version** — Clear cache: `rm -rf ~/.cache/opencode/packages/@vikrant82` and restart
@@ -294,6 +300,25 @@ DCP provides a TUI panel and one prompt-producing slash command:
 
 - `/dcp` — Opens the DCP panel with context, stats, and manual-mode controls.
 - `/dcp-compress [focus]` — Asks the model to run one compression pass. Optional focus text directs what content to compress, following the active `compress.mode`.
+
+### On-demand pruning (no LLM)
+
+`/dcp prune` marks old tool outputs for removal from the outbound prompt. Placeholders land on the
+next request; stored session history is never touched, and `/dcp unprune` reverts.
+
+```
+/dcp prune --older-than 150                                       # completed + errored tools ≥150 LLM steps old
+/dcp prune --older-than 150 --tools serena_*,codebase-memory-*    # only these tool globs (overrides protection)
+/dcp prune --older-than 150 --dry-run                             # preview candidates + estimated savings
+/dcp unprune                                                      # revert the last prune batch
+/dcp unprune --all                                                # revert all manual prune batches
+```
+
+Notes:
+
+- `question`, `edit`, and `write` outputs are skipped unless explicitly selected via `--tools`.
+- Tools already inside active compression blocks, or already pruned, are skipped (reported).
+- Prune batches persist with the session state; undo survives restarts.
 
 ### Prompt Overrides
 
