@@ -29,6 +29,11 @@ const TOOL_COMMANDS: Record<string, [string, string]> = {
     compress: ["/dcp-compress [focus]", "Trigger manual compress tool execution"],
     decompress: ["/dcp decompress <n>", "Restore selected compression"],
     recompress: ["/dcp recompress <n>", "Re-apply a user-decompressed compression"],
+    prune: [
+        "/dcp prune --older-than <n> [--tools …] [--dry-run]",
+        "Prune old tool outputs on demand",
+    ],
+    unprune: ["/dcp unprune [--all]", "Revert manual prune batches"],
 }
 
 function getVisibleCommands(state: SessionState, config: PluginConfig): [string, string][] {
@@ -36,6 +41,8 @@ function getVisibleCommands(state: SessionState, config: PluginConfig): [string,
 
     if (compressPermission(state, config) !== "deny") {
         commands.push(TOOL_COMMANDS.compress)
+        commands.push(TOOL_COMMANDS.prune)
+        commands.push(TOOL_COMMANDS.unprune)
     }
 
     return commands

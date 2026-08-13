@@ -30,9 +30,11 @@ import {
     handleHelpCommand,
     handleManualToggleCommand,
     handleManualTriggerCommand,
+    handlePruneCommand,
     handleRecompressCommand,
     handleStatsCommand,
     handleSweepCommand,
+    handleUnpruneCommand,
 } from "./commands"
 import { type HostPermissionSnapshot } from "./host-permissions"
 import { compressPermission, syncCompressPermissionState } from "./compress-permission"
@@ -250,6 +252,22 @@ export function createCommandExecuteHandler(
                     ...commandCtx,
                     args: subArgs,
                     workingDirectory,
+                })
+                return
+            }
+
+            if (subcommand === "prune") {
+                await handlePruneCommand({
+                    ...commandCtx,
+                    args: subArgs,
+                    workingDirectory,
+                })
+                return
+            }
+            if (subcommand === "unprune") {
+                await handleUnpruneCommand({
+                    ...commandCtx,
+                    args: subArgs,
                 })
                 return
             }

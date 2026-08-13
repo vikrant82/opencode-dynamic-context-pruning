@@ -6,6 +6,7 @@ export {
     handleManualToggleCommand,
     handleManualTriggerCommand,
 } from "./manual"
+export { handlePruneCommand, handleUnpruneCommand } from "./prune"
 export { handleRecompressCommand } from "./recompress"
 export { handleStatsCommand } from "./stats"
 export { handleSweepCommand } from "./sweep"
