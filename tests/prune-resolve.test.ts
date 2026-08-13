@@ -11,7 +11,10 @@ test("age boundary: age == N eligible, N-1 not", () => {
     addTool(state, "call_a", "bash", { turn: 50 }) // age 150
     addTool(state, "call_b", "bash", { turn: 51 }) // age 149
     const res = resolvePruneCandidates(state, buildPruneConfig(), noMessages, { olderThan: 150 })
-    assert.deepEqual(res.candidates.map((c) => c.id), ["call_a"])
+    assert.deepEqual(
+        res.candidates.map((c) => c.id),
+        ["call_a"],
+    )
 })
 
 test("status filter: completed and error in; running and pending out (even explicit)", () => {
@@ -36,7 +39,10 @@ test("default mode skips question/edit/write and protected tools", () => {
     addTool(state, "call_ok", "bash", { turn: 10 })
     const config = buildPruneConfig({ protectedTools: ["serena_*"] })
     const res = resolvePruneCandidates(state, config, noMessages, { olderThan: 100 })
-    assert.deepEqual(res.candidates.map((c) => c.id), ["call_ok"])
+    assert.deepEqual(
+        res.candidates.map((c) => c.id),
+        ["call_ok"],
+    )
     assert.equal(res.skips.builtinSkip, 3)
     assert.equal(res.skips.protected, 1)
 })

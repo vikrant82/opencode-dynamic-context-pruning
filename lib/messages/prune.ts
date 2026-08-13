@@ -233,9 +233,13 @@ const filterCompressedRanges = (
                             summaryChars: summaryContent.length,
                             budgetChars: budgetLimit,
                             overBudget: summaryContent.length > budgetLimit,
-                            overagePercent: summaryContent.length > budgetLimit
-                                ? Math.round(((summaryContent.length - budgetLimit) / budgetLimit) * 100)
-                                : 0,
+                            overagePercent:
+                                summaryContent.length > budgetLimit
+                                    ? Math.round(
+                                          ((summaryContent.length - budgetLimit) / budgetLimit) *
+                                              100,
+                                      )
+                                    : 0,
                         })
                     }
                 } else {
