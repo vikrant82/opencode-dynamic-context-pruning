@@ -309,6 +309,7 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
     }
     for (const { id, entry } of resolution.candidates) {
         state.prune.tools.set(id, entry.tokenCount ?? 0)
+        state.prune.notifiedToolIds.add(id)
         if (parsed.toolGlobs) {
             state.prune.explicitTools.add(id)
         }
@@ -376,6 +377,7 @@ export async function handleUnpruneCommand(ctx: UnpruneCommandContext): Promise<
             const tokens = state.prune.tools.get(id)
             if (state.prune.tools.delete(id)) {
                 state.prune.explicitTools.delete(id)
+                state.prune.notifiedToolIds.delete(id)
                 restored++
                 restoredTokens += tokens ?? 0
             }

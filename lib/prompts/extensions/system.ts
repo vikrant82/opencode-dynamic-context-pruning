@@ -1,4 +1,9 @@
 export const MANUAL_MODE_SYSTEM_EXTENSION = `
+Manual mode is active. Context compression requires explicit user approval.
+
+Do not call the \`compress\` tool on your own — autonomous calls are blocked. If you believe context needs compression, say so in one short line and suggest the user run \`/dcp-compress\`.
+
+When a user message contains \`<compress triggered manually>\`, call the \`compress\` tool immediately and follow the instructions in that message.
 `
 
 export const SUBAGENT_SYSTEM_EXTENSION = `

@@ -4,6 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { Logger } from "../lib/logger"
+import { renderSystemPrompt } from "../lib/prompts"
+import { MANUAL_MODE_SYSTEM_EXTENSION } from "../lib/prompts/extensions/system"
 import { PromptStore } from "../lib/prompts/store"
 import { SYSTEM as SYSTEM_PROMPT } from "../lib/prompts/system"
 
@@ -158,6 +160,41 @@ test("prompt store exposes bundled range-mode compress prompt", () => {
         assert.match(runtimePrompts.compressRange, /COMPRESSED BLOCK PLACEHOLDERS/)
         assert.match(runtimePrompts.compressRange, /BATCHING/)
         assert.match(runtimePrompts.compressRange, /content` array/)
+    } finally {
+        fixture.cleanup()
+    }
+})
+
+const MANUAL_EXTENSION_MARKER = "autonomous calls are blocked"
+
+test("manual mode system extension is non-empty", () => {
+    assert.ok(MANUAL_MODE_SYSTEM_EXTENSION.trim().length > 0)
+})
+
+test("renderSystemPrompt appends the manual mode extension when manual is enabled", () => {
+    const fixture = createPromptStoreFixture()
+
+    try {
+        const runtimePrompts = fixture.store.getRuntimePrompts()
+
+        assert.ok(runtimePrompts.manualExtension.includes(MANUAL_EXTENSION_MARKER))
+        const rendered = renderSystemPrompt(runtimePrompts, undefined, true)
+
+        assert.match(rendered, /Manual mode is active\./)
+        assert.ok(rendered.includes(MANUAL_EXTENSION_MARKER))
+    } finally {
+        fixture.cleanup()
+    }
+})
+
+test("renderSystemPrompt omits the manual mode extension when manual is disabled", () => {
+    const fixture = createPromptStoreFixture()
+
+    try {
+        const runtimePrompts = fixture.store.getRuntimePrompts()
+        const rendered = renderSystemPrompt(runtimePrompts, undefined, false)
+
+        assert.ok(!rendered.includes(MANUAL_EXTENSION_MARKER))
     } finally {
         fixture.cleanup()
     }

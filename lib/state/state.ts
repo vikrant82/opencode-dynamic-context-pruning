@@ -74,6 +74,7 @@ export function createSessionState(): SessionState {
             tools: new Map<string, number>(),
             messages: createPruneMessagesState(),
             explicitTools: new Set<string>(),
+            notifiedToolIds: new Set<string>(),
             batches: [],
         },
         nudges: {
@@ -114,6 +115,7 @@ export function resetSessionState(state: SessionState): void {
         tools: new Map<string, number>(),
         messages: createPruneMessagesState(),
         explicitTools: new Set<string>(),
+        notifiedToolIds: new Set<string>(),
         batches: [],
     }
     state.nudges = {
@@ -177,6 +179,7 @@ export async function ensureSessionInitialized(
 
     state.prune.tools = loadPruneMap(persisted.prune.tools)
     state.prune.explicitTools = new Set(persisted.prune.explicitTools ?? [])
+    state.prune.notifiedToolIds = new Set(persisted.prune.notifiedToolIds ?? [])
     state.prune.batches = Array.isArray(persisted.prune.batches) ? persisted.prune.batches : []
     state.prune.messages = loadPruneMessagesState(persisted.prune.messages)
     state.nudges.contextLimitAnchors = new Set<string>(persisted.nudges.contextLimitAnchors || [])

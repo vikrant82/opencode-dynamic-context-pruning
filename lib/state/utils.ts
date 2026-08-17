@@ -333,6 +333,7 @@ export function resetOnCompaction(state: SessionState): void {
     state.prune.tools = new Map<string, number>()
     state.prune.messages = createPruneMessagesState()
     state.prune.explicitTools = new Set<string>()
+    state.prune.notifiedToolIds = new Set<string>()
     state.prune.batches = []
     state.messageIds = {
         byRawId: new Map<string, string>(),
@@ -344,4 +345,18 @@ export function resetOnCompaction(state: SessionState): void {
         turnNudgeAnchors: new Set<string>(),
         iterationNudgeAnchors: new Set<string>(),
     }
+}
+
+// opencode hands over fresh message copies on every transform pass, so prune() re-reports
+// already-pruned tool ids each time; this delta keeps only the ids not yet notified and
+// marks them as notified so repeats never fire again.
+export function takeUnnotifiedPrunedToolIds(
+    state: SessionState,
+    prunedToolIds: string[],
+): string[] {
+    const unnotified = prunedToolIds.filter((id) => !state.prune.notifiedToolIds.has(id))
+    for (const id of unnotified) {
+        state.prune.notifiedToolIds.add(id)
+    }
+    return unnotified
 }

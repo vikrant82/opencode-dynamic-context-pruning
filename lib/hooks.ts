@@ -39,6 +39,7 @@ import {
 import { type HostPermissionSnapshot } from "./host-permissions"
 import { compressPermission, syncCompressPermissionState } from "./compress-permission"
 import { checkSession, ensureSessionInitialized, saveSessionState, syncToolCache } from "./state"
+import { takeUnnotifiedPrunedToolIds } from "./state/utils"
 import { cacheSystemPromptTokens } from "./ui/utils"
 import { sendUnifiedNotification } from "./ui/notification"
 
@@ -133,14 +134,20 @@ export function createChatMessageTransformHandler(
         syncToolCache(state, config, logger, output.messages)
         buildToolIdList(state, output.messages)
         const prunedToolIds = prune(state, logger, config, output.messages)
-        if (prunedToolIds.length > 0 && state.sessionId) {
+        const newPrunedToolIds = takeUnnotifiedPrunedToolIds(state, prunedToolIds)
+        if (newPrunedToolIds.length > 0 && state.sessionId) {
+            saveSessionState(state, logger).catch((error) => {
+                logger.warn("Failed to persist notified tool ids", {
+                    error: error instanceof Error ? error.message : String(error),
+                })
+            })
             await sendUnifiedNotification(
                 client,
                 logger,
                 config,
                 state,
                 state.sessionId,
-                prunedToolIds,
+                newPrunedToolIds,
                 state.toolParameters,
                 undefined,
                 {},
