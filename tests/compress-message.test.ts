@@ -225,10 +225,7 @@ test("compress message mode batches individual message summaries", async () => {
     )
     assert.match(blocks[1]?.summary || "", /Tool: task/)
     assert.doesNotMatch(blocks[1]?.summary || "", /task output body/)
-    assert.match(
-        blocks[1]?.summary || "",
-        /Completed a subagent task\./,
-    )
+    assert.match(blocks[1]?.summary || "", /Completed a subagent task\./)
 })
 
 test("compress message mode summarizes skill payloads without copying raw content", async () => {
@@ -263,7 +260,7 @@ test("compress message mode summarizes skill payloads without copying raw conten
                     sessionID,
                     "call-skill-1",
                     "skill",
-                    "<skill_content name=\"start-session\">Very long raw skill body</skill_content>",
+                    '<skill_content name="start-session">Very long raw skill body</skill_content>',
                 ),
             ],
         },
