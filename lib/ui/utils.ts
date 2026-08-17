@@ -181,9 +181,13 @@ export function getSessionStatsSnapshot(state: SessionState): SessionStatsSnapsh
 export function formatSessionStatsBlock(snapshot: SessionStatsSnapshot): string {
     const lines: string[] = []
     lines.push(`  Session (turn ${snapshot.turn}):`)
-    lines.push(`    ${snapshot.activeBlocks} compression blocks | ${snapshot.compressedMessages} messages compressed`)
+    lines.push(
+        `    ${snapshot.activeBlocks} compression blocks | ${snapshot.compressedMessages} messages compressed`,
+    )
     lines.push(`    ${snapshot.toolsPruned} tools pruned out of ${snapshot.toolsCached} cached`)
-    lines.push(`    Gross savings: ~${formatTokenCount(snapshot.grossTokensSaved, true)} removed — ~${formatTokenCount(snapshot.summaryTokens, true)} summaries = net ~${formatTokenCount(snapshot.netTokensSaved, true)}`)
+    lines.push(
+        `    Gross savings: ~${formatTokenCount(snapshot.grossTokensSaved, true)} removed — ~${formatTokenCount(snapshot.summaryTokens, true)} summaries = net ~${formatTokenCount(snapshot.netTokensSaved, true)}`,
+    )
     return lines.join("\n")
 }
 

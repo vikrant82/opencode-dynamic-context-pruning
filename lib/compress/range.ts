@@ -58,7 +58,10 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
     const runtimePrompts = ctx.prompts.getRuntimePrompts()
 
     return tool({
-        description: runtimePrompts.compressRange + RANGE_FORMAT_EXTENSION + buildSummaryBudgetExtension(ctx.config.compress.summaryBudget),
+        description:
+            runtimePrompts.compressRange +
+            RANGE_FORMAT_EXTENSION +
+            buildSummaryBudgetExtension(ctx.config.compress.summaryBudget),
         args: buildSchema(),
         async execute(args, toolCtx) {
             const input = args as CompressRangeToolArgs

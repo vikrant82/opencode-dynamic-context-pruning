@@ -43,7 +43,10 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
     const runtimePrompts = ctx.prompts.getRuntimePrompts()
 
     return tool({
-        description: runtimePrompts.compressMessage + MESSAGE_FORMAT_EXTENSION + buildSummaryBudgetExtension(ctx.config.compress.summaryBudget),
+        description:
+            runtimePrompts.compressMessage +
+            MESSAGE_FORMAT_EXTENSION +
+            buildSummaryBudgetExtension(ctx.config.compress.summaryBudget),
         args: buildSchema(),
         async execute(args, toolCtx) {
             const input = args as CompressMessageToolArgs

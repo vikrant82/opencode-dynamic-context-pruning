@@ -1,0 +1,9 @@
+# Tool-managed metadata — prettier churn here has no value
+.serena/
+
+# Project-local opencode config
+/opencode.json
+
+# Session artifacts kept for handoff/analysis
+/dcp-summary-*.md
+/session-*.md

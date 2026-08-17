@@ -26,7 +26,11 @@ interface CompressionNotificationEntry {
     summaryTokens: number
 }
 
-function buildMinimalMessage(state: SessionState, reason: PruneReason | undefined, pruneToolIds: string[]): string {
+function buildMinimalMessage(
+    state: SessionState,
+    reason: PruneReason | undefined,
+    pruneToolIds: string[],
+): string {
     const reasonSuffix = reason ? ` — ${PRUNE_REASON_LABELS[reason]}` : ""
     const header = formatStatsHeader(state.stats.totalPruneTokens, state.stats.pruneTokenCounter)
     const sessionStats = getSessionStatsSnapshot(state)
@@ -258,14 +262,11 @@ export async function sendCompressNotification(
         const block = state.prune.messages.blocksById.get(entry.blockId)
         return total + (block?.durationMs ?? 0)
     }, 0)
-    const durationStr = totalDurationMs >= 1000
-        ? `${(totalDurationMs / 1000).toFixed(1)}s`
-        : `${totalDurationMs}ms`
+    const durationStr =
+        totalDurationMs >= 1000 ? `${(totalDurationMs / 1000).toFixed(1)}s` : `${totalDurationMs}ms`
 
     const netTokens = Math.max(0, compressedTokens - summaryTokens)
-    const reductionPct = compressedTokens > 0
-        ? Math.round((netTokens / compressedTokens) * 100)
-        : 0
+    const reductionPct = compressedTokens > 0 ? Math.round((netTokens / compressedTokens) * 100) : 0
 
     if (config.pruneNotification === "minimal") {
         message = `${notificationHeader} — ${compressionLabel}`
