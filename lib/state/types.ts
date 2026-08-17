@@ -80,6 +80,7 @@ export interface Prune {
     tools: Map<string, number>
     messages: PruneMessagesState
     explicitTools: Set<string>
+    notifiedToolIds: Set<string>
     batches: ManualPruneBatch[]
 }
 

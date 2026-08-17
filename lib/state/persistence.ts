@@ -32,6 +32,7 @@ export interface PersistedPrune {
     tools?: Record<string, number>
     messages?: PersistedPruneMessagesState
     explicitTools?: string[]
+    notifiedToolIds?: string[]
     batches?: ManualPruneBatch[]
 }
 
@@ -102,6 +103,7 @@ export async function saveSessionState(
                 tools: Object.fromEntries(sessionState.prune.tools),
                 messages: serializePruneMessagesState(sessionState.prune.messages),
                 explicitTools: Array.from(sessionState.prune.explicitTools),
+                notifiedToolIds: Array.from(sessionState.prune.notifiedToolIds),
                 batches: sessionState.prune.batches,
             },
             nudges: {
