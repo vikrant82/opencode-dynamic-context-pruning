@@ -38,6 +38,42 @@ test("parsePruneArgs: valid full invocation", () => {
     assert.equal(parsed.dryRun, true)
 })
 
+test("parsePruneArgs: --top-N parses the embedded number", () => {
+    const parsed = parsePruneArgs(["--older-than", "10", "--top-5"])
+    assert.equal(parsed.error, undefined)
+    assert.equal(parsed.topN, 5)
+})
+
+test("parsePruneArgs: --indexes parses comma-separated values", () => {
+    const parsed = parsePruneArgs(["--older-than", "10", "--indexes", "1,3,5"])
+    assert.equal(parsed.error, undefined)
+    assert.deepEqual(parsed.indexes, [1, 3, 5])
+})
+
+test("parsePruneArgs: --indexes expands ranges", () => {
+    const parsed = parsePruneArgs(["--older-than", "10", "--indexes", "2-4"])
+    assert.equal(parsed.error, undefined)
+    assert.deepEqual(parsed.indexes, [2, 3, 4])
+})
+
+test("parsePruneArgs: --indexes handles mixed values and ranges with dedup", () => {
+    const parsed = parsePruneArgs(["--older-than", "10", "--indexes", "1,3-5,3"])
+    assert.equal(parsed.error, undefined)
+    assert.deepEqual(parsed.indexes, [1, 3, 4, 5])
+})
+
+test("parsePruneArgs: --indexes rejects invalid specs", () => {
+    assert.ok(parsePruneArgs(["--older-than", "10", "--indexes"]).error)
+    assert.ok(parsePruneArgs(["--older-than", "10", "--indexes", "abc"]).error)
+    assert.ok(parsePruneArgs(["--older-than", "10", "--indexes", "0"]).error)
+    assert.ok(parsePruneArgs(["--older-than", "10", "--indexes", "5-2"]).error)
+})
+
+test("parsePruneArgs: --indexes and --top-N are mutually exclusive", () => {
+    const parsed = parsePruneArgs(["--older-than", "10", "--top-5", "--indexes", "1-3"])
+    assert.ok(parsed.error?.includes("mutually exclusive"))
+})
+
 test("parsePruneArgs: missing --older-than is an error", () => {
     const parsed = parsePruneArgs(["--dry-run"])
     assert.ok(parsed.error?.includes("--older-than"))
@@ -136,4 +172,118 @@ test("invalid args print usage and mutate nothing", async () => {
     await handlePruneCommand(ctx)
     assert.equal(ctx.state.prune.tools.size, 0)
     assert.ok(sent.join("\n").includes("Usage: /dcp prune"))
+})
+
+test("dry-run shows 1-based row indexes for every group", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "10", "--dry-run"])
+    addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    addTool(ctx.state, "call_b", "serena_find_symbol", { turn: 2, tokenCount: 800 })
+    addTool(ctx.state, "call_c", "grep", { turn: 3, tokenCount: 200 })
+    await handlePruneCommand(ctx)
+    const out = sent.join("\n")
+    assert.ok(out.includes("1  serena_find_symbol"))
+    assert.ok(out.includes("2  bash"))
+    assert.ok(out.includes("3  grep"))
+    assert.ok(!out.includes("←"))
+})
+
+test("--top-N dry-run marks the selected rows and mutates nothing", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "10", "--top-2", "--dry-run"])
+    addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    addTool(ctx.state, "call_b", "serena_find_symbol", { turn: 2, tokenCount: 800 })
+    addTool(ctx.state, "call_c", "grep", { turn: 3, tokenCount: 200 })
+    await handlePruneCommand(ctx)
+    assert.equal(ctx.state.prune.tools.size, 0)
+    const lines = sent.join("\n").split("\n")
+    const serenaLine = lines.find((l) => l.includes("serena_find_symbol"))!
+    const bashLine = lines.find((l) => l.includes("bash"))!
+    const grepLine = lines.find((l) => l.includes("grep"))!
+    assert.ok(serenaLine.includes("←"))
+    assert.ok(bashLine.includes("←"))
+    assert.ok(!grepLine.includes("←"))
+    assert.ok(sent.join("\n").includes("~1,300 tokens"))
+})
+
+test("--indexes dry-run marks only the selected rows", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "10", "--indexes", "1,3", "--dry-run"])
+    addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    addTool(ctx.state, "call_b", "serena_find_symbol", { turn: 2, tokenCount: 800 })
+    addTool(ctx.state, "call_c", "grep", { turn: 3, tokenCount: 200 })
+    await handlePruneCommand(ctx)
+    const lines = sent.join("\n").split("\n")
+    const serenaLine = lines.find((l) => l.includes("serena_find_symbol"))!
+    const bashLine = lines.find((l) => l.includes("bash"))!
+    const grepLine = lines.find((l) => l.includes("grep"))!
+    assert.ok(serenaLine.includes("←"))
+    assert.ok(!bashLine.includes("←"))
+    assert.ok(grepLine.includes("←"))
+    assert.ok(sent.join("\n").includes("~1,000 tokens"))
+})
+
+test("--top-N commit prunes only the top N groups", async () => {
+    const { ctx } = makeCtx(["--older-than", "10", "--top-2"])
+    addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    addTool(ctx.state, "call_b", "serena_find_symbol", { turn: 2, tokenCount: 800 })
+    addTool(ctx.state, "call_c", "grep", { turn: 3, tokenCount: 200 })
+    await handlePruneCommand(ctx)
+    assert.ok(ctx.state.prune.tools.has("call_b"))
+    assert.ok(ctx.state.prune.tools.has("call_a"))
+    assert.ok(!ctx.state.prune.tools.has("call_c"))
+    assert.equal(ctx.state.prune.batches[0].selector, "older-than 10, top: 2")
+    assert.equal(ctx.state.prune.batches[0].estTokens, 1300)
+})
+
+test("--top-N larger than group count selects all groups", async () => {
+    const { ctx } = makeCtx(["--older-than", "10", "--top-9"])
+    addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    addTool(ctx.state, "call_b", "grep", { turn: 2, tokenCount: 200 })
+    await handlePruneCommand(ctx)
+    assert.equal(ctx.state.prune.tools.size, 2)
+})
+
+test("--indexes commit prunes only the selected groups", async () => {
+    const { ctx } = makeCtx(["--older-than", "10", "--indexes", "1,3"])
+    addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    addTool(ctx.state, "call_b", "serena_find_symbol", { turn: 2, tokenCount: 800 })
+    addTool(ctx.state, "call_c", "grep", { turn: 3, tokenCount: 200 })
+    await handlePruneCommand(ctx)
+    assert.ok(ctx.state.prune.tools.has("call_b"))
+    assert.ok(ctx.state.prune.tools.has("call_c"))
+    assert.ok(!ctx.state.prune.tools.has("call_a"))
+    assert.equal(ctx.state.prune.batches[0].selector, "older-than 10, indexes: 1,3")
+    assert.equal(ctx.state.prune.batches[0].estTokens, 1000)
+})
+
+test("--indexes with a range commit prunes the range", async () => {
+    const { ctx } = makeCtx(["--older-than", "10", "--indexes", "1-2"])
+    addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    addTool(ctx.state, "call_b", "serena_find_symbol", { turn: 2, tokenCount: 800 })
+    addTool(ctx.state, "call_c", "grep", { turn: 3, tokenCount: 200 })
+    await handlePruneCommand(ctx)
+    assert.ok(ctx.state.prune.tools.has("call_b"))
+    assert.ok(ctx.state.prune.tools.has("call_a"))
+    assert.ok(!ctx.state.prune.tools.has("call_c"))
+    assert.equal(ctx.state.prune.batches[0].selector, "older-than 10, indexes: 1,2")
+})
+
+test("--indexes out of range reports an error and mutates nothing", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "10", "--indexes", "5"])
+    addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    await handlePruneCommand(ctx)
+    assert.equal(ctx.state.prune.tools.size, 0)
+    assert.equal(ctx.state.prune.batches.length, 0)
+    assert.ok(sent.join("\n").includes("out of range"))
+})
+
+test("--top-N composes with --tools (indexes apply after glob filtering)", async () => {
+    const { ctx } = makeCtx(["--older-than", "10", "--tools", "serena_*", "--top-1"])
+    addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    addTool(ctx.state, "call_b", "serena_find_symbol", { turn: 2, tokenCount: 800 })
+    addTool(ctx.state, "call_c", "serena_replace_symbol", { turn: 3, tokenCount: 600 })
+    await handlePruneCommand(ctx)
+    assert.ok(ctx.state.prune.tools.has("call_b"))
+    assert.ok(!ctx.state.prune.tools.has("call_c"))
+    assert.ok(!ctx.state.prune.tools.has("call_a"))
+    assert.ok(ctx.state.prune.explicitTools.has("call_b"))
+    assert.equal(ctx.state.prune.batches[0].selector, "older-than 10, tools: serena_*, top: 1")
 })

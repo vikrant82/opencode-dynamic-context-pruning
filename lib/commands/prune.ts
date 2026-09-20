@@ -4,6 +4,8 @@
  *
  * Usage:
  *   /dcp prune --older-than 150 [--tools serena_*,codebase-memory-*] [--dry-run]
+ *   /dcp prune --older-than 1 --top-5
+ *   /dcp prune --older-than 1 --indexes 1,3-5
  *   /dcp unprune [--all]
  */
 import type { Logger } from "../logger"
@@ -130,8 +132,48 @@ export const MAX_PRUNE_BATCHES = 20
 export interface ParsedPruneArgs {
     olderThan?: number
     toolGlobs?: string[]
+    indexes?: number[]
+    topN?: number
     dryRun: boolean
     error?: string
+}
+
+export interface ToolGroup {
+    tool: string
+    count: number
+    tokens: number
+    ids: string[]
+}
+
+export function parseIndexSpec(spec: string): { indexes?: number[]; error?: string } {
+    const indexes = new Set<number>()
+    const parts = spec
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    if (parts.length === 0) {
+        return { error: "--indexes requires values like 1,2,3 or 1-5" }
+    }
+    for (const part of parts) {
+        const rangeMatch = part.match(/^(\d+)-(\d+)$/)
+        if (rangeMatch) {
+            const start = parseInt(rangeMatch[1], 10)
+            const end = parseInt(rangeMatch[2], 10)
+            if (start < 1 || end < start) {
+                return { error: `Invalid index range: ${part}` }
+            }
+            for (let i = start; i <= end; i++) indexes.add(i)
+        } else if (/^\d+$/.test(part)) {
+            const n = parseInt(part, 10)
+            if (n < 1) {
+                return { error: `Index must be >= 1: ${part}` }
+            }
+            indexes.add(n)
+        } else {
+            return { error: `Invalid index spec: ${part} (use numbers or ranges like 1-5)` }
+        }
+    }
+    return { indexes: [...indexes].sort((a, b) => a - b) }
 }
 
 export function parsePruneArgs(args: string[]): ParsedPruneArgs {
@@ -161,6 +203,18 @@ export function parsePruneArgs(args: string[]): ParsedPruneArgs {
                 return { dryRun: false, error: "--tools requires comma-separated tool globs" }
             }
             parsed.toolGlobs = globs
+        } else if (arg === "--indexes") {
+            const raw = args[++i]
+            if (!raw) {
+                return { dryRun: false, error: "--indexes requires values like 1,2,3 or 1-5" }
+            }
+            const spec = parseIndexSpec(raw)
+            if (spec.error) {
+                return { dryRun: false, error: spec.error }
+            }
+            parsed.indexes = spec.indexes
+        } else if (/^--top-\d+$/.test(arg)) {
+            parsed.topN = parseInt(arg.slice("--top-".length), 10)
         } else if (arg === "--dry-run") {
             parsed.dryRun = true
         } else {
@@ -170,17 +224,26 @@ export function parsePruneArgs(args: string[]): ParsedPruneArgs {
     if (parsed.olderThan === undefined) {
         return { dryRun: parsed.dryRun, error: "Missing required --older-than <steps>" }
     }
+    if (parsed.indexes && parsed.topN !== undefined) {
+        return { dryRun: parsed.dryRun, error: "--indexes and --top-N are mutually exclusive" }
+    }
     return parsed
 }
 
 const PRUNE_USAGE = [
-    "Usage: /dcp prune --older-than <steps> [--tools <glob,glob,…>] [--dry-run]",
+    "Usage: /dcp prune --older-than <steps> [--tools <globs>] [--indexes <list> | --top-N] [--dry-run]",
     "",
     "  --older-than <steps>  Prune completed/errored tool outputs aged ≥ <steps> LLM steps",
     "  --tools <globs>       Comma-separated tool-name globs; explicit selection overrides protection",
+    "  --indexes <list>      Select rows by index from the eligible table (e.g. 1,3 or 1-5 or 1,3-5)",
+    "  --top-N               Select the top N rows by estimated tokens (e.g. --top-5)",
     "  --dry-run             List candidates + estimated savings without pruning",
     "",
+    "  --indexes and --top-N are mutually exclusive; both compose with --tools.",
+    "",
     "Example: /dcp prune --older-than 150 --tools serena_*,codebase-memory-* --dry-run",
+    "Example: /dcp prune --older-than 1 --top-5",
+    "Example: /dcp prune --older-than 1 --indexes 1,3-5",
 ].join("\n")
 
 function boxLines(title: string): string[] {
@@ -192,15 +255,26 @@ function boxLines(title: string): string[] {
     ]
 }
 
-function groupByTool(candidates: PruneCandidate[]): Map<string, { count: number; tokens: number }> {
-    const groups = new Map<string, { count: number; tokens: number }>()
-    for (const { entry } of candidates) {
-        const group = groups.get(entry.tool) ?? { count: 0, tokens: 0 }
+export function buildOrderedGroups(candidates: PruneCandidate[]): ToolGroup[] {
+    const groups = new Map<string, ToolGroup>()
+    for (const { id, entry } of candidates) {
+        const group = groups.get(entry.tool) ?? { tool: entry.tool, count: 0, tokens: 0, ids: [] }
         group.count += 1
         group.tokens += entry.tokenCount ?? 0
+        group.ids.push(id)
         groups.set(entry.tool, group)
     }
-    return groups
+    return [...groups.values()].sort((a, b) => b.tokens - a.tokens)
+}
+
+export function selectGroupsByIndex(groups: ToolGroup[], indexes: number[]): ToolGroup[] {
+    const selected: ToolGroup[] = []
+    for (const idx of indexes) {
+        if (idx >= 1 && idx <= groups.length) {
+            selected.push(groups[idx - 1])
+        }
+    }
+    return selected
 }
 
 function skipSummary(skips: PruneSkips, explicit: boolean): string[] {
@@ -218,19 +292,20 @@ function formatDryRunMessage(
     resolution: PruneResolution,
     parsed: ParsedPruneArgs,
     totalTokens: number,
+    groups: ToolGroup[],
+    selectedIndexes: Set<number> | null,
 ): string {
     const lines = boxLines("                 DCP Prune (dry-run)")
     lines.push(
         `Eligible: ${resolution.candidates.length} tool(s) older than ${parsed.olderThan} steps`,
     )
-    const groups = [...groupByTool(resolution.candidates).entries()].sort(
-        (a, b) => b[1].tokens - a[1].tokens,
-    )
-    for (const [tool, group] of groups) {
+    groups.forEach((group, i) => {
+        const idx = i + 1
+        const marker = selectedIndexes?.has(idx) ? " ←" : ""
         lines.push(
-            `  ${tool.padEnd(24)} ×${String(group.count).padStart(3)}   ~${group.tokens.toLocaleString()} tok`,
+            `  ${String(idx).padStart(2)}  ${group.tool.padEnd(24)} ×${String(group.count).padStart(3)}   ~${group.tokens.toLocaleString()} tok${marker}`,
         )
-    }
+    })
     const parts = skipSummary(resolution.skips, !!parsed.toolGlobs)
     if (parts.length > 0) {
         lines.push(`  Skipped: ${parts.join(", ")}`)
@@ -299,15 +374,39 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         logger.info("Prune command: no candidates", { skips: resolution.skips })
         return
     }
-    const candidateIds = resolution.candidates.map((c) => c.id)
+    const groups = buildOrderedGroups(resolution.candidates)
+    const hasIndexSelection = parsed.indexes !== undefined || parsed.topN !== undefined
+    let effectiveCandidates = resolution.candidates
+    let selectedIndexSet: Set<number> | null = null
+    if (hasIndexSelection) {
+        const indexes =
+            parsed.topN !== undefined
+                ? Array.from({ length: Math.min(parsed.topN, groups.length) }, (_, i) => i + 1)
+                : parsed.indexes!
+        const outOfRange = indexes.filter((i) => i > groups.length)
+        if (outOfRange.length > 0) {
+            const message = `Index ${outOfRange.join(", ")} out of range (only ${groups.length} group(s) eligible)`
+            await sendIgnoredMessage(client, sessionId, message, params, logger)
+            return
+        }
+        selectedIndexSet = new Set(indexes)
+        const selectedGroups = selectGroupsByIndex(groups, indexes)
+        const selectedIds = new Set(selectedGroups.flatMap((g) => g.ids))
+        effectiveCandidates = resolution.candidates.filter((c) => selectedIds.has(c.id))
+    }
+    if (effectiveCandidates.length === 0) {
+        await sendIgnoredMessage(client, sessionId, "Selection matched no tools.", params, logger)
+        return
+    }
+    const candidateIds = effectiveCandidates.map((c) => c.id)
     const totalTokens = getTotalToolTokens(state, candidateIds)
     if (parsed.dryRun) {
-        const message = formatDryRunMessage(resolution, parsed, totalTokens)
+        const message = formatDryRunMessage(resolution, parsed, totalTokens, groups, selectedIndexSet)
         await sendIgnoredMessage(client, sessionId, message, params, logger)
         logger.info("Prune command: dry-run", { candidates: candidateIds.length, totalTokens })
         return
     }
-    for (const { id, entry } of resolution.candidates) {
+    for (const { id, entry } of effectiveCandidates) {
         state.prune.tools.set(id, entry.tokenCount ?? 0)
         state.prune.notifiedToolIds.add(id)
         if (parsed.toolGlobs) {
@@ -315,9 +414,11 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         }
     }
     const batchId = (state.prune.batches[state.prune.batches.length - 1]?.id ?? 0) + 1
-    const selector = parsed.toolGlobs
-        ? `older-than ${parsed.olderThan}, tools: ${parsed.toolGlobs.join(",")}`
-        : `older-than ${parsed.olderThan}`
+    const selectorParts = [`older-than ${parsed.olderThan}`]
+    if (parsed.toolGlobs) selectorParts.push(`tools: ${parsed.toolGlobs.join(",")}`)
+    if (parsed.indexes) selectorParts.push(`indexes: ${parsed.indexes.join(",")}`)
+    if (parsed.topN !== undefined) selectorParts.push(`top: ${parsed.topN}`)
+    const selector = selectorParts.join(", ")
     state.prune.batches.push({
         id: batchId,
         at: new Date().toISOString(),
@@ -336,7 +437,7 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
     } catch (err: any) {
         logger.error("Failed to persist state after prune", { error: err?.message })
     }
-    const message = formatCommitMessage(resolution.candidates.length, batchId, totalTokens)
+    const message = formatCommitMessage(effectiveCandidates.length, batchId, totalTokens)
     await sendIgnoredMessage(client, sessionId, message, params, logger)
     logger.info("Prune command completed", {
         tools: candidateIds.length,
