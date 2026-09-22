@@ -11,6 +11,7 @@ import { join } from "path"
 import type {
     CompressionBlock,
     ManualPruneBatch,
+    PrunePreview,
     PrunedMessageEntry,
     SessionState,
     SessionStats,
@@ -34,6 +35,7 @@ export interface PersistedPrune {
     explicitTools?: string[]
     notifiedToolIds?: string[]
     batches?: ManualPruneBatch[]
+    preview?: PrunePreview | null
 }
 
 export interface PersistedNudges {
@@ -105,6 +107,7 @@ export async function saveSessionState(
                 explicitTools: Array.from(sessionState.prune.explicitTools),
                 notifiedToolIds: Array.from(sessionState.prune.notifiedToolIds),
                 batches: sessionState.prune.batches,
+                preview: sessionState.prune.preview,
             },
             nudges: {
                 contextLimitAnchors: Array.from(sessionState.nudges.contextLimitAnchors),

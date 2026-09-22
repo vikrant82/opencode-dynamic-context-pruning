@@ -76,6 +76,7 @@ export function createSessionState(): SessionState {
             explicitTools: new Set<string>(),
             notifiedToolIds: new Set<string>(),
             batches: [],
+            preview: null,
         },
         nudges: {
             contextLimitAnchors: new Set<string>(),
@@ -117,6 +118,7 @@ export function resetSessionState(state: SessionState): void {
         explicitTools: new Set<string>(),
         notifiedToolIds: new Set<string>(),
         batches: [],
+        preview: null,
     }
     state.nudges = {
         contextLimitAnchors: new Set<string>(),
@@ -181,6 +183,7 @@ export async function ensureSessionInitialized(
     state.prune.explicitTools = new Set(persisted.prune.explicitTools ?? [])
     state.prune.notifiedToolIds = new Set(persisted.prune.notifiedToolIds ?? [])
     state.prune.batches = Array.isArray(persisted.prune.batches) ? persisted.prune.batches : []
+    state.prune.preview = persisted.prune.preview ?? null
     state.prune.messages = loadPruneMessagesState(persisted.prune.messages)
     state.nudges.contextLimitAnchors = new Set<string>(persisted.nudges.contextLimitAnchors || [])
     state.nudges.turnNudgeAnchors = new Set<string>([

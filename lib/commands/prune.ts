@@ -145,6 +145,26 @@ export interface ToolGroup {
     ids: string[]
 }
 
+function isValidPrunePreview(value: unknown): value is NonNullable<SessionState["prune"]["preview"]> {
+    if (!value || typeof value !== "object") return false
+    const preview = value as SessionState["prune"]["preview"]
+    return (
+        preview !== null &&
+        Number.isSafeInteger(preview.olderThan) &&
+        preview.olderThan > 0 &&
+        (preview.toolGlobs === undefined ||
+            (Array.isArray(preview.toolGlobs) && preview.toolGlobs.every((glob) => typeof glob === "string"))) &&
+        Array.isArray(preview.groups) &&
+        preview.groups.every(
+            (group) =>
+                !!group &&
+                typeof group.tool === "string" &&
+                Array.isArray(group.ids) &&
+                group.ids.every((id) => typeof id === "string"),
+        )
+    )
+}
+
 export function parseIndexSpec(spec: string): { indexes?: number[]; error?: string } {
     const indexes = new Set<number>()
     const parts = spec
@@ -159,13 +179,13 @@ export function parseIndexSpec(spec: string): { indexes?: number[]; error?: stri
         if (rangeMatch) {
             const start = parseInt(rangeMatch[1], 10)
             const end = parseInt(rangeMatch[2], 10)
-            if (start < 1 || end < start) {
+            if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) {
                 return { error: `Invalid index range: ${part}` }
             }
             for (let i = start; i <= end; i++) indexes.add(i)
         } else if (/^\d+$/.test(part)) {
             const n = parseInt(part, 10)
-            if (n < 1) {
+            if (!Number.isSafeInteger(n) || n < 1) {
                 return { error: `Index must be >= 1: ${part}` }
             }
             indexes.add(n)
@@ -213,8 +233,13 @@ export function parsePruneArgs(args: string[]): ParsedPruneArgs {
                 return { dryRun: false, error: spec.error }
             }
             parsed.indexes = spec.indexes
-        } else if (/^--top-\d+$/.test(arg)) {
-            parsed.topN = parseInt(arg.slice("--top-".length), 10)
+        } else if (arg.startsWith("--top-")) {
+            const rawTop = arg.slice("--top-".length)
+            const topN = /^\d+$/.test(rawTop) ? Number(rawTop) : NaN
+            if (!Number.isSafeInteger(topN) || topN < 1) {
+                return { dryRun: false, error: "--top-N requires a positive integer" }
+            }
+            parsed.topN = topN
         } else if (arg === "--dry-run") {
             parsed.dryRun = true
         } else {
@@ -235,10 +260,11 @@ const PRUNE_USAGE = [
     "",
     "  --older-than <steps>  Prune completed/errored tool outputs aged ≥ <steps> LLM steps",
     "  --tools <globs>       Comma-separated tool-name globs; explicit selection overrides protection",
-    "  --indexes <list>      Select rows by index from the eligible table (e.g. 1,3 or 1-5 or 1,3-5)",
-    "  --top-N               Select the top N rows by estimated tokens (e.g. --top-5)",
+    "  --indexes <list>      Select rows from the last matching dry-run preview (e.g. 1,3-5)",
+    "  --top-N               Select the preview's top N rows (e.g. --top-5)",
     "  --dry-run             List candidates + estimated savings without pruning",
     "",
+    "  Preview first with --dry-run and the same --older-than/--tools flags.",
     "  --indexes and --top-N are mutually exclusive; both compose with --tools.",
     "",
     "Example: /dcp prune --older-than 150 --tools serena_*,codebase-memory-* --dry-run",
@@ -264,7 +290,9 @@ export function buildOrderedGroups(candidates: PruneCandidate[]): ToolGroup[] {
         group.ids.push(id)
         groups.set(entry.tool, group)
     }
-    return [...groups.values()].sort((a, b) => b.tokens - a.tokens)
+    return [...groups.values()].sort(
+        (a, b) => b.tokens - a.tokens || (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0),
+    )
 }
 
 export function selectGroupsByIndex(groups: ToolGroup[], indexes: number[]): ToolGroup[] {
@@ -368,44 +396,129 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         olderThan: parsed.olderThan!,
         toolGlobs: parsed.toolGlobs,
     })
-    if (resolution.candidates.length === 0) {
+    const groups = buildOrderedGroups(resolution.candidates)
+    const hasIndexSelection = parsed.indexes !== undefined || parsed.topN !== undefined
+    let effectiveCandidates = resolution.candidates
+    let selectedIndexSet: Set<number> | null = null
+
+    if (parsed.dryRun) {
+        if (hasIndexSelection) {
+            const indexes =
+                parsed.topN !== undefined
+                    ? Array.from({ length: Math.min(parsed.topN, groups.length) }, (_, i) => i + 1)
+                    : parsed.indexes!
+            const outOfRange = indexes.filter((i) => i > groups.length)
+            if (outOfRange.length > 0) {
+                const message = `Index ${outOfRange.join(", ")} out of range (only ${groups.length} group(s) eligible)`
+                await sendIgnoredMessage(client, sessionId, message, params, logger)
+                return
+            }
+            selectedIndexSet = new Set(indexes)
+            const selectedIds = new Set(selectGroupsByIndex(groups, indexes).flatMap((g) => g.ids))
+            effectiveCandidates = resolution.candidates.filter((c) => selectedIds.has(c.id))
+        }
+        if (resolution.candidates.length === 0) {
+            state.prune.preview = { olderThan: parsed.olderThan!, toolGlobs: parsed.toolGlobs, groups: [] }
+            try {
+                await saveSessionState(state, logger)
+            } catch (err: any) {
+                logger.error("Failed to persist prune preview", { error: err?.message })
+            }
+            const message = formatNoCandidatesMessage(state, resolution, parsed)
+            await sendIgnoredMessage(client, sessionId, message, params, logger)
+            logger.info("Prune command: no candidates", { skips: resolution.skips })
+            return
+        }
+        const candidateIds = effectiveCandidates.map((c) => c.id)
+        const totalTokens = getTotalToolTokens(state, candidateIds)
+        const message = formatDryRunMessage(resolution, parsed, totalTokens, groups, selectedIndexSet)
+        await sendIgnoredMessage(client, sessionId, message, params, logger)
+        state.prune.preview = {
+            olderThan: parsed.olderThan!,
+            toolGlobs: parsed.toolGlobs ? [...parsed.toolGlobs] : undefined,
+            groups: groups.map(({ tool, ids }) => ({ tool, ids: [...ids] })),
+        }
+        try {
+            await saveSessionState(state, logger)
+        } catch (err: any) {
+            logger.error("Failed to persist prune preview", { error: err?.message })
+        }
+        logger.info("Prune command: dry-run", { candidates: candidateIds.length, totalTokens })
+        return
+    }
+
+    let selectedSnapshotIds: string[] | null = null
+    if (hasIndexSelection) {
+        const preview = isValidPrunePreview(state.prune.preview) ? state.prune.preview : null
+        const sameGlobs =
+            preview &&
+            ((preview.toolGlobs === undefined && parsed.toolGlobs === undefined) ||
+                (preview.toolGlobs !== undefined &&
+                    parsed.toolGlobs !== undefined &&
+                    preview.toolGlobs.length === parsed.toolGlobs.length &&
+                    preview.toolGlobs.every((glob, index) => glob === parsed.toolGlobs![index])))
+        if (!preview || preview.olderThan !== parsed.olderThan || !sameGlobs) {
+            await sendIgnoredMessage(
+                client,
+                sessionId,
+                "No compatible prune preview. Run the same --older-than and --tools flags with --dry-run first.",
+                params,
+                logger,
+            )
+            return
+        }
+        const indexes =
+            parsed.topN !== undefined
+                ? Array.from({ length: Math.min(parsed.topN, preview.groups.length) }, (_, i) => i + 1)
+                : parsed.indexes!
+        const outOfRange = indexes.filter((i) => i > preview.groups.length)
+        if (outOfRange.length > 0) {
+            await sendIgnoredMessage(
+                client,
+                sessionId,
+                `Index ${outOfRange.join(", ")} out of range (preview has ${preview.groups.length} group(s))`,
+                params,
+                logger,
+            )
+            return
+        }
+        selectedIndexSet = new Set(indexes)
+        selectedSnapshotIds = selectGroupsByIndex(
+            preview.groups.map((group) => ({
+                tool: group.tool,
+                count: group.ids.length,
+                tokens: 0,
+                ids: group.ids,
+            })),
+            indexes,
+        ).flatMap((group) => group.ids)
+        const currentlyEligible = new Map(resolution.candidates.map((candidate) => [candidate.id, candidate]))
+        const unavailable = selectedSnapshotIds.filter((id) => !currentlyEligible.has(id))
+        if (unavailable.length > 0) {
+            await sendIgnoredMessage(
+                client,
+                sessionId,
+                `Preview selection is no longer fully eligible (${unavailable.length} call ID(s) unavailable). No tools were pruned; run the same flags with --dry-run again.`,
+                params,
+                logger,
+            )
+            return
+        }
+        const selectedIds = new Set(selectedSnapshotIds)
+        effectiveCandidates = resolution.candidates.filter((candidate) => selectedIds.has(candidate.id))
+    } else if (resolution.candidates.length === 0) {
         const message = formatNoCandidatesMessage(state, resolution, parsed)
         await sendIgnoredMessage(client, sessionId, message, params, logger)
         logger.info("Prune command: no candidates", { skips: resolution.skips })
         return
     }
-    const groups = buildOrderedGroups(resolution.candidates)
-    const hasIndexSelection = parsed.indexes !== undefined || parsed.topN !== undefined
-    let effectiveCandidates = resolution.candidates
-    let selectedIndexSet: Set<number> | null = null
-    if (hasIndexSelection) {
-        const indexes =
-            parsed.topN !== undefined
-                ? Array.from({ length: Math.min(parsed.topN, groups.length) }, (_, i) => i + 1)
-                : parsed.indexes!
-        const outOfRange = indexes.filter((i) => i > groups.length)
-        if (outOfRange.length > 0) {
-            const message = `Index ${outOfRange.join(", ")} out of range (only ${groups.length} group(s) eligible)`
-            await sendIgnoredMessage(client, sessionId, message, params, logger)
-            return
-        }
-        selectedIndexSet = new Set(indexes)
-        const selectedGroups = selectGroupsByIndex(groups, indexes)
-        const selectedIds = new Set(selectedGroups.flatMap((g) => g.ids))
-        effectiveCandidates = resolution.candidates.filter((c) => selectedIds.has(c.id))
-    }
+
     if (effectiveCandidates.length === 0) {
         await sendIgnoredMessage(client, sessionId, "Selection matched no tools.", params, logger)
         return
     }
     const candidateIds = effectiveCandidates.map((c) => c.id)
     const totalTokens = getTotalToolTokens(state, candidateIds)
-    if (parsed.dryRun) {
-        const message = formatDryRunMessage(resolution, parsed, totalTokens, groups, selectedIndexSet)
-        await sendIgnoredMessage(client, sessionId, message, params, logger)
-        logger.info("Prune command: dry-run", { candidates: candidateIds.length, totalTokens })
-        return
-    }
     for (const { id, entry } of effectiveCandidates) {
         state.prune.tools.set(id, entry.tokenCount ?? 0)
         state.prune.notifiedToolIds.add(id)
@@ -429,6 +542,7 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
     if (state.prune.batches.length > MAX_PRUNE_BATCHES) {
         state.prune.batches.shift()
     }
+    state.prune.preview = null
     state.stats.pruneTokenCounter += totalTokens
     state.stats.totalPruneTokens += state.stats.pruneTokenCounter
     state.stats.pruneTokenCounter = 0
@@ -463,7 +577,13 @@ export async function handleUnpruneCommand(ctx: UnpruneCommandContext): Promise<
         )
         return
     }
+    state.prune.preview = null
     if (state.prune.batches.length === 0) {
+        try {
+            await saveSessionState(state, logger)
+        } catch (err: any) {
+            logger.error("Failed to persist state after unprune", { error: err?.message })
+        }
         await sendIgnoredMessage(client, sessionId, "No manual prunes to revert.", params, logger)
         return
     }
