@@ -3,6 +3,7 @@ import test from "node:test"
 import { addTool, buildPruneConfig, buildState, fakeClient, testLogger } from "./prune-helpers"
 import { handlePruneCommand, parsePruneArgs } from "../lib/commands/prune"
 import type { WithParts } from "../lib/state"
+import { loadSessionState } from "../lib/state/persistence"
 
 const noMessages: WithParts[] = []
 
@@ -24,6 +25,14 @@ function makeCtx(args: string[], opts?: { currentTurn?: number; protectedTools?:
     }
 }
 
+async function previewThenCommit(ctx: ReturnType<typeof makeCtx>["ctx"]): Promise<void> {
+    const args = [...ctx.args]
+    ctx.args = [...args, "--dry-run"]
+    await handlePruneCommand(ctx)
+    ctx.args = args
+    await handlePruneCommand(ctx)
+}
+
 test("parsePruneArgs: valid full invocation", () => {
     const parsed = parsePruneArgs([
         "--older-than",
@@ -42,6 +51,12 @@ test("parsePruneArgs: --top-N parses the embedded number", () => {
     const parsed = parsePruneArgs(["--older-than", "10", "--top-5"])
     assert.equal(parsed.error, undefined)
     assert.equal(parsed.topN, 5)
+})
+
+test("parsePruneArgs rejects zero, unsafe top counts, and unsafe indexes", () => {
+    assert.ok(parsePruneArgs(["--older-than", "10", "--top-0"]).error)
+    assert.ok(parsePruneArgs(["--older-than", "10", "--top-9007199254740992"]).error)
+    assert.ok(parsePruneArgs(["--older-than", "10", "--indexes", "9007199254740992"]).error)
 })
 
 test("parsePruneArgs: --indexes parses comma-separated values", () => {
@@ -225,7 +240,7 @@ test("--top-N commit prunes only the top N groups", async () => {
     addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
     addTool(ctx.state, "call_b", "serena_find_symbol", { turn: 2, tokenCount: 800 })
     addTool(ctx.state, "call_c", "grep", { turn: 3, tokenCount: 200 })
-    await handlePruneCommand(ctx)
+    await previewThenCommit(ctx)
     assert.ok(ctx.state.prune.tools.has("call_b"))
     assert.ok(ctx.state.prune.tools.has("call_a"))
     assert.ok(!ctx.state.prune.tools.has("call_c"))
@@ -237,7 +252,7 @@ test("--top-N larger than group count selects all groups", async () => {
     const { ctx } = makeCtx(["--older-than", "10", "--top-9"])
     addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
     addTool(ctx.state, "call_b", "grep", { turn: 2, tokenCount: 200 })
-    await handlePruneCommand(ctx)
+    await previewThenCommit(ctx)
     assert.equal(ctx.state.prune.tools.size, 2)
 })
 
@@ -246,7 +261,7 @@ test("--indexes commit prunes only the selected groups", async () => {
     addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
     addTool(ctx.state, "call_b", "serena_find_symbol", { turn: 2, tokenCount: 800 })
     addTool(ctx.state, "call_c", "grep", { turn: 3, tokenCount: 200 })
-    await handlePruneCommand(ctx)
+    await previewThenCommit(ctx)
     assert.ok(ctx.state.prune.tools.has("call_b"))
     assert.ok(ctx.state.prune.tools.has("call_c"))
     assert.ok(!ctx.state.prune.tools.has("call_a"))
@@ -259,7 +274,7 @@ test("--indexes with a range commit prunes the range", async () => {
     addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
     addTool(ctx.state, "call_b", "serena_find_symbol", { turn: 2, tokenCount: 800 })
     addTool(ctx.state, "call_c", "grep", { turn: 3, tokenCount: 200 })
-    await handlePruneCommand(ctx)
+    await previewThenCommit(ctx)
     assert.ok(ctx.state.prune.tools.has("call_b"))
     assert.ok(ctx.state.prune.tools.has("call_a"))
     assert.ok(!ctx.state.prune.tools.has("call_c"))
@@ -269,10 +284,94 @@ test("--indexes with a range commit prunes the range", async () => {
 test("--indexes out of range reports an error and mutates nothing", async () => {
     const { ctx, sent } = makeCtx(["--older-than", "10", "--indexes", "5"])
     addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    ctx.args.push("--dry-run")
+    await handlePruneCommand(ctx)
+    ctx.args.pop()
     await handlePruneCommand(ctx)
     assert.equal(ctx.state.prune.tools.size, 0)
     assert.equal(ctx.state.prune.batches.length, 0)
     assert.ok(sent.join("\n").includes("out of range"))
+})
+
+test("index commit uses previewed rows across the age boundary", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "1", "--indexes", "1"], { currentTurn: 10 })
+    addTool(ctx.state, "bash_preview", "bash", { turn: 0, tokenCount: 500 })
+    addTool(ctx.state, "grep_preview", "grep", { turn: 10, tokenCount: 1000 })
+    ctx.args = ["--older-than", "1", "--dry-run"]
+    await handlePruneCommand(ctx)
+    assert.deepEqual(ctx.state.prune.preview?.groups, [{ tool: "bash", ids: ["bash_preview"] }])
+    ctx.args = ["--older-than", "1", "--indexes", "1"]
+    ctx.state.currentTurn = 11
+    await handlePruneCommand(ctx)
+    assert.deepEqual(ctx.state.prune.batches[0].toolIds, ["bash_preview"])
+    assert.ok(ctx.state.prune.tools.has("bash_preview"))
+    assert.ok(!ctx.state.prune.tools.has("grep_preview"))
+    assert.equal(ctx.state.currentTurn - ctx.state.toolParameters.get("grep_preview")!.turn, 1)
+    assert.equal(ctx.state.prune.preview, null)
+    assert.ok(sent.join("\n").includes("Pruned 1 tool(s)"))
+    const persisted = await loadSessionState(ctx.sessionId, ctx.logger)
+    assert.deepEqual(persisted?.prune.batches?.[0]?.toolIds, ["bash_preview"])
+})
+
+test("top-1 commit keeps previewed ranking when an age-boundary group becomes higher-ranked", async () => {
+    const { ctx } = makeCtx(["--older-than", "1", "--top-1"], { currentTurn: 10 })
+    addTool(ctx.state, "bash_preview", "bash", { turn: 0, tokenCount: 500 })
+    addTool(ctx.state, "grep_preview", "grep", { turn: 10, tokenCount: 1000 })
+    ctx.args = ["--older-than", "1", "--dry-run"]
+    await handlePruneCommand(ctx)
+    assert.deepEqual(ctx.state.prune.preview?.groups, [{ tool: "bash", ids: ["bash_preview"] }])
+    ctx.args = ["--older-than", "1", "--top-1"]
+    ctx.state.currentTurn = 11
+    await handlePruneCommand(ctx)
+    assert.deepEqual(ctx.state.prune.batches[0].toolIds, ["bash_preview"])
+    assert.ok(!ctx.state.prune.tools.has("grep_preview"))
+})
+
+test("index commit does not prune a new higher-token call in a previewed group", async () => {
+    const { ctx } = makeCtx(["--older-than", "1", "--indexes", "1"], { currentTurn: 10 })
+    addTool(ctx.state, "bash_preview", "bash", { turn: 0, tokenCount: 500 })
+    ctx.args = ["--older-than", "1", "--dry-run"]
+    await handlePruneCommand(ctx)
+    ctx.args = ["--older-than", "1", "--indexes", "1"]
+    ctx.state.currentTurn = 11
+    addTool(ctx.state, "bash_new", "bash", { turn: 10, tokenCount: 5000 })
+    await handlePruneCommand(ctx)
+    assert.deepEqual(ctx.state.prune.batches[0].toolIds, ["bash_preview"])
+    assert.ok(ctx.state.prune.tools.has("bash_preview"))
+    assert.ok(!ctx.state.prune.tools.has("bash_new"))
+})
+
+test("index commit rejects when a previewed call ID is no longer eligible", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "10", "--indexes", "1"])
+    addTool(ctx.state, "bash_preview", "bash", { turn: 1, tokenCount: 500 })
+    ctx.args = ["--older-than", "10", "--dry-run"]
+    await handlePruneCommand(ctx)
+    ctx.args = ["--older-than", "10", "--indexes", "1"]
+    ctx.state.toolParameters.get("bash_preview")!.status = "running"
+    await handlePruneCommand(ctx)
+    assert.equal(ctx.state.prune.tools.size, 0)
+    assert.equal(ctx.state.prune.batches.length, 0)
+    assert.ok(sent.join("\n").includes("No tools were pruned"))
+})
+
+test("index commit without a matching preview fails closed", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "10", "--indexes", "1"])
+    addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    await handlePruneCommand(ctx)
+    assert.equal(ctx.state.prune.tools.size, 0)
+    assert.equal(ctx.state.prune.batches.length, 0)
+    assert.ok(sent.join("\n").includes("No compatible prune preview"))
+})
+
+test("index commit requires explicit --tools to match the preview flags", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "10", "--tools", "*"])
+    addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
+    ctx.args = ["--older-than", "10", "--tools", "*", "--dry-run"]
+    await handlePruneCommand(ctx)
+    ctx.args = ["--older-than", "10", "--indexes", "1"]
+    await handlePruneCommand(ctx)
+    assert.equal(ctx.state.prune.tools.size, 0)
+    assert.ok(sent.join("\n").includes("No compatible prune preview"))
 })
 
 test("--top-N composes with --tools (indexes apply after glob filtering)", async () => {
@@ -280,7 +379,7 @@ test("--top-N composes with --tools (indexes apply after glob filtering)", async
     addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
     addTool(ctx.state, "call_b", "serena_find_symbol", { turn: 2, tokenCount: 800 })
     addTool(ctx.state, "call_c", "serena_replace_symbol", { turn: 3, tokenCount: 600 })
-    await handlePruneCommand(ctx)
+    await previewThenCommit(ctx)
     assert.ok(ctx.state.prune.tools.has("call_b"))
     assert.ok(!ctx.state.prune.tools.has("call_c"))
     assert.ok(!ctx.state.prune.tools.has("call_a"))

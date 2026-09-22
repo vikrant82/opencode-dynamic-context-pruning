@@ -76,12 +76,24 @@ export interface ManualPruneBatch {
     estTokens: number
 }
 
+export interface PrunePreviewGroup {
+    tool: string
+    ids: string[]
+}
+
+export interface PrunePreview {
+    olderThan: number
+    toolGlobs?: string[]
+    groups: PrunePreviewGroup[]
+}
+
 export interface Prune {
     tools: Map<string, number>
     messages: PruneMessagesState
     explicitTools: Set<string>
     notifiedToolIds: Set<string>
     batches: ManualPruneBatch[]
+    preview: PrunePreview | null
 }
 
 export interface PendingManualTrigger {
