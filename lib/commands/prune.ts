@@ -145,7 +145,9 @@ export interface ToolGroup {
     ids: string[]
 }
 
-function isValidPrunePreview(value: unknown): value is NonNullable<SessionState["prune"]["preview"]> {
+function isValidPrunePreview(
+    value: unknown,
+): value is NonNullable<SessionState["prune"]["preview"]> {
     if (!value || typeof value !== "object") return false
     const preview = value as SessionState["prune"]["preview"]
     return (
@@ -153,7 +155,8 @@ function isValidPrunePreview(value: unknown): value is NonNullable<SessionState[
         Number.isSafeInteger(preview.olderThan) &&
         preview.olderThan > 0 &&
         (preview.toolGlobs === undefined ||
-            (Array.isArray(preview.toolGlobs) && preview.toolGlobs.every((glob) => typeof glob === "string"))) &&
+            (Array.isArray(preview.toolGlobs) &&
+                preview.toolGlobs.every((glob) => typeof glob === "string"))) &&
         Array.isArray(preview.groups) &&
         preview.groups.every(
             (group) =>
@@ -179,7 +182,12 @@ export function parseIndexSpec(spec: string): { indexes?: number[]; error?: stri
         if (rangeMatch) {
             const start = parseInt(rangeMatch[1], 10)
             const end = parseInt(rangeMatch[2], 10)
-            if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) {
+            if (
+                !Number.isSafeInteger(start) ||
+                !Number.isSafeInteger(end) ||
+                start < 1 ||
+                end < start
+            ) {
                 return { error: `Invalid index range: ${part}` }
             }
             for (let i = start; i <= end; i++) indexes.add(i)
@@ -418,7 +426,11 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
             effectiveCandidates = resolution.candidates.filter((c) => selectedIds.has(c.id))
         }
         if (resolution.candidates.length === 0) {
-            state.prune.preview = { olderThan: parsed.olderThan!, toolGlobs: parsed.toolGlobs, groups: [] }
+            state.prune.preview = {
+                olderThan: parsed.olderThan!,
+                toolGlobs: parsed.toolGlobs,
+                groups: [],
+            }
             try {
                 await saveSessionState(state, logger)
             } catch (err: any) {
@@ -431,7 +443,13 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         }
         const candidateIds = effectiveCandidates.map((c) => c.id)
         const totalTokens = getTotalToolTokens(state, candidateIds)
-        const message = formatDryRunMessage(resolution, parsed, totalTokens, groups, selectedIndexSet)
+        const message = formatDryRunMessage(
+            resolution,
+            parsed,
+            totalTokens,
+            groups,
+            selectedIndexSet,
+        )
         await sendIgnoredMessage(client, sessionId, message, params, logger)
         state.prune.preview = {
             olderThan: parsed.olderThan!,
@@ -469,7 +487,10 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         }
         const indexes =
             parsed.topN !== undefined
-                ? Array.from({ length: Math.min(parsed.topN, preview.groups.length) }, (_, i) => i + 1)
+                ? Array.from(
+                      { length: Math.min(parsed.topN, preview.groups.length) },
+                      (_, i) => i + 1,
+                  )
                 : parsed.indexes!
         const outOfRange = indexes.filter((i) => i > preview.groups.length)
         if (outOfRange.length > 0) {
@@ -492,7 +513,9 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
             })),
             indexes,
         ).flatMap((group) => group.ids)
-        const currentlyEligible = new Map(resolution.candidates.map((candidate) => [candidate.id, candidate]))
+        const currentlyEligible = new Map(
+            resolution.candidates.map((candidate) => [candidate.id, candidate]),
+        )
         const unavailable = selectedSnapshotIds.filter((id) => !currentlyEligible.has(id))
         if (unavailable.length > 0) {
             await sendIgnoredMessage(
@@ -505,7 +528,9 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
             return
         }
         const selectedIds = new Set(selectedSnapshotIds)
-        effectiveCandidates = resolution.candidates.filter((candidate) => selectedIds.has(candidate.id))
+        effectiveCandidates = resolution.candidates.filter((candidate) =>
+            selectedIds.has(candidate.id),
+        )
     } else if (resolution.candidates.length === 0) {
         const message = formatNoCandidatesMessage(state, resolution, parsed)
         await sendIgnoredMessage(client, sessionId, message, params, logger)
