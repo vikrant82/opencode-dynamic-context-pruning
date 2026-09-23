@@ -360,18 +360,92 @@ test("index commit without a matching preview fails closed", async () => {
     await handlePruneCommand(ctx)
     assert.equal(ctx.state.prune.tools.size, 0)
     assert.equal(ctx.state.prune.batches.length, 0)
-    assert.ok(sent.join("\n").includes("No compatible prune preview"))
+    assert.ok(sent.join("\n").includes("No saved prune preview"))
 })
 
-test("index commit requires explicit --tools to match the preview flags", async () => {
+test("index commit inherits --tools from the preview when omitted", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "1", "--tools", "*"])
+    addTool(ctx.state, "call_question", "question", { turn: 1, tokenCount: 10000 })
+    addTool(ctx.state, "call_bash", "bash", { turn: 2, tokenCount: 500 })
+    ctx.args = ["--older-than", "1", "--tools", "*", "--dry-run"]
+    await handlePruneCommand(ctx)
+    assert.deepEqual(ctx.state.prune.preview?.toolGlobs, ["*"])
+    const persistedPreview = await loadSessionState(ctx.sessionId, ctx.logger)
+    assert.deepEqual(persistedPreview?.prune.preview?.toolGlobs, ["*"])
+    ctx.args = ["--older-than", "1", "--indexes", "1"]
+    await handlePruneCommand(ctx)
+    assert.deepEqual(ctx.state.prune.batches[0].toolIds, ["call_question"])
+    assert.ok(ctx.state.prune.explicitTools.has("call_question"))
+    assert.ok(!ctx.state.prune.tools.has("call_bash"))
+    assert.equal(ctx.state.prune.batches[0].selector, "older-than 1, tools: *, indexes: 1")
+    assert.equal(ctx.state.prune.preview, null)
+    const persistedCommit = await loadSessionState(ctx.sessionId, ctx.logger)
+    assert.equal(persistedCommit?.prune.preview, null)
+    assert.ok(!sent.join("\n").includes("No saved prune preview"))
+    assert.ok(!sent.join("\n").includes("Prune preview does not match"))
+})
+
+test("top-5 commit inherits preview globs and prunes only its five snapshotted groups", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "1", "--tools", "*"])
+    addTool(ctx.state, "question_preview", "question", { turn: 1, tokenCount: 10000 })
+    addTool(ctx.state, "edit_preview", "edit", { turn: 2, tokenCount: 9000 })
+    addTool(ctx.state, "bash_preview", "bash", { turn: 3, tokenCount: 800 })
+    addTool(ctx.state, "grep_preview", "grep", { turn: 4, tokenCount: 700 })
+    addTool(ctx.state, "glob_preview", "glob", { turn: 5, tokenCount: 600 })
+    addTool(ctx.state, "read_preview", "read", { turn: 6, tokenCount: 500 })
+    addTool(ctx.state, "tail_preview", "tail", { turn: 7, tokenCount: 100 })
+    ctx.args = ["--older-than", "1", "--tools", "*", "--dry-run"]
+    await handlePruneCommand(ctx)
+    assert.deepEqual(ctx.state.prune.preview?.toolGlobs, ["*"])
+    assert.deepEqual(
+        ctx.state.prune.preview?.groups.map((group) => group.tool),
+        ["question", "edit", "bash", "grep", "glob", "read", "tail"],
+    )
+    const persistedPreview = await loadSessionState(ctx.sessionId, ctx.logger)
+    assert.deepEqual(persistedPreview?.prune.preview, ctx.state.prune.preview)
+
+    // These arrived after preview and must not be included merely because their tool
+    // matches the inherited wildcard or changes the current top-five ranking.
+    addTool(ctx.state, "bash_new", "bash", { turn: 8, tokenCount: 20000 })
+    addTool(ctx.state, "new_tool", "new_tool", { turn: 9, tokenCount: 30000 })
+    ctx.args = ["--older-than", "1", "--top-5"]
+    await handlePruneCommand(ctx)
+
+    const expectedIds = [
+        "question_preview",
+        "edit_preview",
+        "bash_preview",
+        "grep_preview",
+        "glob_preview",
+    ]
+    assert.deepEqual(ctx.state.prune.batches[0].toolIds, expectedIds)
+    assert.deepEqual([...ctx.state.prune.tools.keys()].sort(), [...expectedIds].sort())
+    assert.ok(ctx.state.prune.explicitTools.has("question_preview"))
+    assert.ok(ctx.state.prune.explicitTools.has("edit_preview"))
+    assert.ok(!ctx.state.prune.tools.has("read_preview"))
+    assert.ok(!ctx.state.prune.tools.has("tail_preview"))
+    assert.ok(!ctx.state.prune.tools.has("bash_new"))
+    assert.ok(!ctx.state.prune.tools.has("new_tool"))
+    assert.equal(ctx.state.prune.batches[0].selector, "older-than 1, tools: *, top: 5")
+    assert.equal(ctx.state.prune.batches[0].estTokens, 21100)
+    assert.equal(ctx.state.prune.preview, null)
+    const persistedCommit = await loadSessionState(ctx.sessionId, ctx.logger)
+    assert.equal(persistedCommit?.prune.preview, null)
+    assert.ok(!sent.join("\n").includes("No saved prune preview"))
+    assert.ok(!sent.join("\n").includes("Prune preview does not match"))
+})
+
+test("index commit rejects explicit --tools that differ from the preview", async () => {
     const { ctx, sent } = makeCtx(["--older-than", "10", "--tools", "*"])
     addTool(ctx.state, "call_a", "bash", { turn: 1, tokenCount: 500 })
     ctx.args = ["--older-than", "10", "--tools", "*", "--dry-run"]
     await handlePruneCommand(ctx)
-    ctx.args = ["--older-than", "10", "--indexes", "1"]
+    ctx.args = ["--older-than", "10", "--tools", "bash", "--indexes", "1"]
     await handlePruneCommand(ctx)
     assert.equal(ctx.state.prune.tools.size, 0)
-    assert.ok(sent.join("\n").includes("No compatible prune preview"))
+    assert.equal(ctx.state.prune.explicitTools.size, 0)
+    assert.equal(ctx.state.prune.batches.length, 0)
+    assert.ok(sent.join("\n").includes("Prune preview does not match"))
 })
 
 test("--top-N composes with --tools (indexes apply after glob filtering)", async () => {
