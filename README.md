@@ -338,12 +338,13 @@ Preview matching calls first, then select from that preview by rank or index (th
 
 ```
 /dcp prune --older-than 1 --tools * --dry-run
-/dcp prune --older-than 1 --tools * --top-5                      # prune the preview's top five
-/dcp prune --older-than 1 --tools * --indexes 1,3-5               # or prune these preview indexes
+/dcp prune --older-than 1 --top-5                                # prune the preview's top five
+/dcp prune --older-than 1 --indexes 1,3-5                         # or prune these preview indexes
 ```
 
-Selection uses the latest matching preview snapshot: its selected call IDs stay fixed even if
-eligible-call ranking changes, and the command rejects the selection if any ID is unavailable.
+Selection inherits the preview's `--tools` globs when omitted; an explicitly different `--tools`
+value is rejected. Its selected call IDs stay fixed even if eligible-call ranking changes, and
+the command rejects the selection if any ID is unavailable.
 Rerun `--dry-run` to update the preview. Pruning without an index selector remains supported.
 
 Notes:

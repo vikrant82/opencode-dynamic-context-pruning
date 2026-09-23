@@ -272,7 +272,7 @@ const PRUNE_USAGE = [
     "  --top-N               Select the preview's top N rows (e.g. --top-5)",
     "  --dry-run             List candidates + estimated savings without pruning",
     "",
-    "  Preview first with --dry-run and the same --older-than/--tools flags.",
+    "  Preview first with --dry-run and the same --older-than; --tools may be omitted on apply.",
     "  --indexes and --top-N are mutually exclusive; both compose with --tools.",
     "",
     "Example: /dcp prune --older-than 150 --tools serena_*,codebase-memory-* --dry-run",
@@ -466,20 +466,34 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
     }
 
     let selectedSnapshotIds: string[] | null = null
+    let effectiveToolGlobs: string[] | undefined = parsed.toolGlobs
     if (hasIndexSelection) {
         const preview = isValidPrunePreview(state.prune.preview) ? state.prune.preview : null
-        const sameGlobs =
-            preview &&
-            ((preview.toolGlobs === undefined && parsed.toolGlobs === undefined) ||
-                (preview.toolGlobs !== undefined &&
-                    parsed.toolGlobs !== undefined &&
-                    preview.toolGlobs.length === parsed.toolGlobs.length &&
-                    preview.toolGlobs.every((glob, index) => glob === parsed.toolGlobs![index])))
-        if (!preview || preview.olderThan !== parsed.olderThan || !sameGlobs) {
+        // When using index selectors, --tools is optional: the preview already encodes the
+        // tool filtering. If the user omits --tools, inherit the preview's globs.
+        if (parsed.toolGlobs === undefined && preview?.toolGlobs !== undefined) {
+            effectiveToolGlobs = preview.toolGlobs
+        }
+        if (!preview) {
             await sendIgnoredMessage(
                 client,
                 sessionId,
-                "No compatible prune preview. Run the same --older-than and --tools flags with --dry-run first.",
+                "No saved prune preview for this session. Run --dry-run again before --top-N or --indexes.",
+                params,
+                logger,
+            )
+            return
+        }
+        const sameGlobs =
+            parsed.toolGlobs === undefined ||
+            (preview.toolGlobs !== undefined &&
+                preview.toolGlobs.length === parsed.toolGlobs.length &&
+                preview.toolGlobs.every((glob, index) => glob === parsed.toolGlobs![index]))
+        if (preview.olderThan !== parsed.olderThan || !sameGlobs) {
+            await sendIgnoredMessage(
+                client,
+                sessionId,
+                "Prune preview does not match --older-than or --tools. Run --dry-run with those flags again; omit --tools on apply to inherit the preview's selection.",
                 params,
                 logger,
             )
@@ -513,8 +527,17 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
             })),
             indexes,
         ).flatMap((group) => group.ids)
+        // If the user omitted --tools but the preview had globs, re-resolve with the
+        // preview's globs so the eligibility check includes the same tools.
+        const eligibilityResolution =
+            parsed.toolGlobs === undefined && preview.toolGlobs !== undefined
+                ? resolvePruneCandidates(state, config, messages, {
+                      olderThan: parsed.olderThan!,
+                      toolGlobs: preview.toolGlobs,
+                  })
+                : resolution
         const currentlyEligible = new Map(
-            resolution.candidates.map((candidate) => [candidate.id, candidate]),
+            eligibilityResolution.candidates.map((candidate) => [candidate.id, candidate]),
         )
         const unavailable = selectedSnapshotIds.filter((id) => !currentlyEligible.has(id))
         if (unavailable.length > 0) {
@@ -528,7 +551,7 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
             return
         }
         const selectedIds = new Set(selectedSnapshotIds)
-        effectiveCandidates = resolution.candidates.filter((candidate) =>
+        effectiveCandidates = eligibilityResolution.candidates.filter((candidate) =>
             selectedIds.has(candidate.id),
         )
     } else if (resolution.candidates.length === 0) {
@@ -547,13 +570,13 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
     for (const { id, entry } of effectiveCandidates) {
         state.prune.tools.set(id, entry.tokenCount ?? 0)
         state.prune.notifiedToolIds.add(id)
-        if (parsed.toolGlobs) {
+        if (effectiveToolGlobs) {
             state.prune.explicitTools.add(id)
         }
     }
     const batchId = (state.prune.batches[state.prune.batches.length - 1]?.id ?? 0) + 1
     const selectorParts = [`older-than ${parsed.olderThan}`]
-    if (parsed.toolGlobs) selectorParts.push(`tools: ${parsed.toolGlobs.join(",")}`)
+    if (effectiveToolGlobs) selectorParts.push(`tools: ${effectiveToolGlobs.join(",")}`)
     if (parsed.indexes) selectorParts.push(`indexes: ${parsed.indexes.join(",")}`)
     if (parsed.topN !== undefined) selectorParts.push(`top: ${parsed.topN}`)
     const selector = selectorParts.join(", ")
