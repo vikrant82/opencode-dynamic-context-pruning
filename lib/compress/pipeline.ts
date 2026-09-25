@@ -32,6 +32,7 @@ export interface NotificationEntry {
 export interface PreparedSession {
     rawMessages: WithParts[]
     searchContext: SearchContext
+    state: ToolContext["state"]
 }
 
 export async function prepareSession(
@@ -39,9 +40,22 @@ export async function prepareSession(
     toolCtx: RunContext,
     title: string,
 ): Promise<PreparedSession> {
-    await refreshManualMode(ctx.state, toolCtx.sessionID, ctx.logger, ctx.config.manualMode.enabled)
+    const rawMessages = await fetchSessionMessages(ctx.client, toolCtx.sessionID)
+    const state = ctx.stateStore
+        ? await ctx.stateStore.ensureInitialized(toolCtx.sessionID, (sessionState) =>
+              ensureSessionInitialized(
+                  ctx.client,
+                  sessionState,
+                  toolCtx.sessionID,
+                  ctx.logger,
+                  rawMessages,
+                  ctx.config.manualMode.enabled,
+              ),
+          )
+        : ctx.state!
+    await refreshManualMode(state, toolCtx.sessionID, ctx.logger, ctx.config.manualMode.enabled)
 
-    if (ctx.state.manualMode && ctx.state.manualMode !== "compress-pending") {
+    if (state.manualMode && state.manualMode !== "compress-pending") {
         throw new Error(
             "Manual mode: compress blocked. Do not retry until `<compress triggered manually>` appears in user context.",
         )
@@ -56,25 +70,15 @@ export async function prepareSession(
 
     toolCtx.metadata({ title })
 
-    const rawMessages = await fetchSessionMessages(ctx.client, toolCtx.sessionID)
+    assignMessageRefs(state, rawMessages)
 
-    await ensureSessionInitialized(
-        ctx.client,
-        ctx.state,
-        toolCtx.sessionID,
-        ctx.logger,
-        rawMessages,
-        ctx.config.manualMode.enabled,
-    )
-
-    assignMessageRefs(ctx.state, rawMessages)
-
-    deduplicate(ctx.state, ctx.logger, ctx.config, rawMessages)
-    purgeErrors(ctx.state, ctx.logger, ctx.config, rawMessages)
+    deduplicate(state, ctx.logger, ctx.config, rawMessages)
+    purgeErrors(state, ctx.logger, ctx.config, rawMessages)
 
     return {
         rawMessages,
-        searchContext: buildSearchContext(ctx.state, rawMessages),
+        searchContext: buildSearchContext(state, rawMessages),
+        state,
     }
 }
 
@@ -84,12 +88,13 @@ export async function finalizeSession(
     rawMessages: WithParts[],
     entries: NotificationEntry[],
     batchTopic: string | undefined,
+    state = ctx.state!,
 ): Promise<void> {
-    ctx.state.manualMode = ctx.state.manualMode ? "active" : false
-    applyPendingCompressionDurations(ctx.state)
-    await saveSessionState(ctx.state, ctx.logger)
+    state.manualMode = state.manualMode ? "active" : false
+    applyPendingCompressionDurations(state)
+    await saveSessionState(state, ctx.logger)
 
-    const params = getCurrentParams(ctx.state, rawMessages, ctx.logger)
+    const params = getCurrentParams(state, rawMessages, ctx.logger)
     const sessionMessageIds = rawMessages
         .filter((msg) => !isIgnoredUserMessage(msg))
         .map((msg) => msg.info.id)
@@ -98,7 +103,7 @@ export async function finalizeSession(
         ctx.client,
         ctx.logger,
         ctx.config,
-        ctx.state,
+        state,
         toolCtx.sessionID,
         entries,
         batchTopic,

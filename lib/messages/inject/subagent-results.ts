@@ -68,8 +68,18 @@ export const injectExtendedSubAgentResults = async (
                 continue
             }
 
-            const subAgentResultText = buildSubagentResultText(subAgentMessages)
+            const endTime = part.state.time?.end
+            const boundedMessages =
+                typeof endTime === "number" && Number.isFinite(endTime)
+                    ? subAgentMessages.filter(
+                          (message) =>
+                              typeof message.info?.time?.created === "number" &&
+                              message.info.time.created <= endTime,
+                      )
+                    : subAgentMessages
+            const subAgentResultText = buildSubagentResultText(boundedMessages)
             if (!subAgentResultText) {
+                state.subAgentResultCache.set(part.callID, "")
                 continue
             }
 

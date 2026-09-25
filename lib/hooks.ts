@@ -1,4 +1,4 @@
-import type { SessionState, WithParts } from "./state"
+import type { SessionState, SessionStateStore, WithParts } from "./state"
 import type { Logger } from "./logger"
 import type { PluginConfig } from "./config"
 import { assignMessageRefs } from "./message-ids"
@@ -23,6 +23,7 @@ import {
     resolveCompressionDuration,
 } from "./compress/timing"
 import { filterMessages, filterMessagesInPlace } from "./messages/shape"
+import { getLastUserMessage } from "./messages/query"
 import {
     applyPendingManualTrigger,
     handleContextCommand,
@@ -51,7 +52,7 @@ const INTERNAL_AGENT_SIGNATURES = [
 ]
 
 export function createSystemPromptHandler(
-    state: SessionState,
+    store: SessionStateStore,
     logger: Logger,
     config: PluginConfig,
     prompts: PromptStore,
@@ -60,12 +61,19 @@ export function createSystemPromptHandler(
         input: { sessionID?: string; model: { limit: { context: number } } },
         output: { system: string[] },
     ) => {
-        if (input.model?.limit?.context) {
+        const state = input.sessionID ? store.peekInitialized(input.sessionID) : undefined
+        const isSubAgent = state?.isSubAgent ?? false
+        const manualMode = state ? !!state.manualMode : !!config.manualMode.enabled
+        const effectivePermission = state
+            ? compressPermission(state, config)
+            : config.compress.permission
+
+        if (state && input.model?.limit?.context) {
             state.modelContextLimit = input.model.limit.context
             logger.debug("Cached model context limit", { limit: state.modelContextLimit })
         }
 
-        if (state.isSubAgent && !config.experimental.allowSubAgents) {
+        if (isSubAgent && !config.experimental.allowSubAgents) {
             return
         }
 
@@ -74,11 +82,6 @@ export function createSystemPromptHandler(
             logger.info("Skipping DCP system prompt injection for internal agent")
             return
         }
-
-        const effectivePermission =
-            input.sessionID && state.sessionId === input.sessionID
-                ? compressPermission(state, config)
-                : config.compress.permission
 
         if (effectivePermission === "deny") {
             return
@@ -89,8 +92,8 @@ export function createSystemPromptHandler(
         const newPrompt = renderSystemPrompt(
             runtimePrompts,
             buildProtectedToolsExtension(config.compress.protectedTools),
-            !!state.manualMode,
-            state.isSubAgent && config.experimental.allowSubAgents,
+            manualMode,
+            isSubAgent && config.experimental.allowSubAgents,
         )
         if (output.system.length > 0) {
             output.system[output.system.length - 1] += "\n\n" + newPrompt
@@ -102,7 +105,7 @@ export function createSystemPromptHandler(
 
 export function createChatMessageTransformHandler(
     client: any,
-    state: SessionState,
+    store: SessionStateStore,
     logger: Logger,
     config: PluginConfig,
     prompts: PromptStore,
@@ -119,7 +122,20 @@ export function createChatMessageTransformHandler(
             })
         }
 
-        await checkSession(client, state, logger, output.messages, config.manualMode.enabled)
+        const lastUserMessage = getLastUserMessage(output.messages)
+        const sessionId =
+            lastUserMessage?.info.sessionID ??
+            output.messages.find((message) => message.info?.sessionID)?.info.sessionID
+        if (!sessionId) return
+
+        const state = await checkSession(
+            client,
+            store,
+            logger,
+            output.messages,
+            config.manualMode.enabled,
+        )
+        if (!state) return
 
         syncCompressPermissionState(state, config, hostPermissions, output.messages)
 
@@ -194,7 +210,7 @@ export function createChatMessageTransformHandler(
 
 export function createCommandExecuteHandler(
     client: any,
-    state: SessionState,
+    store: SessionStateStore,
     logger: Logger,
     config: PluginConfig,
     workingDirectory: string,
@@ -214,13 +230,15 @@ export function createCommandExecuteHandler(
             })
             const messages = filterMessages(messagesResponse.data || messagesResponse)
 
-            await ensureSessionInitialized(
-                client,
-                state,
-                input.sessionID,
-                logger,
-                messages,
-                config.manualMode.enabled,
+            const state = await store.ensureInitialized(input.sessionID, (sessionState) =>
+                ensureSessionInitialized(
+                    client,
+                    sessionState,
+                    input.sessionID,
+                    logger,
+                    messages,
+                    config.manualMode.enabled,
+                ),
             )
 
             syncCompressPermissionState(state, config, hostPermissions, messages)
@@ -342,24 +360,27 @@ export function createTextCompleteHandler() {
     }
 }
 
-export function createEventHandler(state: SessionState, logger: Logger) {
+export function createEventHandler(store: SessionStateStore, logger: Logger) {
     return async (input: { event: any }) => {
+        const event = input.event
+        if (event?.type !== "message.part.updated") return
+        const part = event.properties?.part
+        if (part?.type !== "tool" || part.tool !== "compress") return
+
+        const eventSessionId =
+            part.sessionID ?? event?.properties?.sessionID ?? event?.properties?.info?.sessionID
+        if (typeof eventSessionId !== "string" || !eventSessionId) {
+            logger.debug("Skipping compression timing event without session ID")
+            return
+        }
+        const state = store.get(eventSessionId)
         const eventTime =
-            typeof input.event?.time === "number" && Number.isFinite(input.event.time)
-                ? input.event.time
-                : typeof input.event?.properties?.time === "number" &&
-                    Number.isFinite(input.event.properties.time)
-                  ? input.event.properties.time
+            typeof event?.time === "number" && Number.isFinite(event.time)
+                ? event.time
+                : typeof event?.properties?.time === "number" &&
+                    Number.isFinite(event.properties.time)
+                  ? event.properties.time
                   : undefined
-
-        if (input.event.type !== "message.part.updated") {
-            return
-        }
-
-        const part = input.event.properties?.part
-        if (part?.type !== "tool" || part.tool !== "compress") {
-            return
-        }
 
         if (part.state.status === "pending") {
             if (typeof part.callID !== "string" || typeof part.messageID !== "string") {

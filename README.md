@@ -154,6 +154,8 @@ DCP supports two compression modes:
 
 In `range` mode, when a new compression overlaps an earlier one, the earlier summary is nested inside the new one so information is preserved through layers of compression rather than diluted away. In both modes, protected tool outputs (such as subagents and skills) and protected file patterns are kept in compression summaries, ensuring that the most important information is never lost. You can also enable `protectUserMessages` to preserve your messages verbatim during compression, though note that large prompts (e.g. copy-pasting log files in the prompt) will then never be compressed away.
 
+DCP state is isolated per session, so parent and subagent sessions no longer share or reset each other's state. Task outputs are expanded only with the answer the subagent produced by the time that task call completed. Background launch placeholders remain unchanged because the result arrives in the completion notice.
+
 ### Deduplication
 
 Identifies repeated tool calls (same tool, same arguments) and keeps only the most recent output. Recalculated when the compress tool runs, so prompt cache is only impacted alongside compression.

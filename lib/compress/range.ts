@@ -71,12 +71,13 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                     ? (toolCtx as unknown as { callID: string }).callID
                     : undefined
 
-            const { rawMessages, searchContext } = await prepareSession(
+            const { rawMessages, searchContext, state } = await prepareSession(
                 ctx,
                 toolCtx,
                 `Compress Range: ${input.topic}`,
             )
-            const resolvedPlans = resolveRanges(input, searchContext, ctx.state)
+            const sessionCtx = { ...ctx, state: state ?? ctx.state! }
+            const resolvedPlans = resolveRanges(input, searchContext, sessionCtx.state)
             validateNonOverlapping(resolvedPlans)
 
             const notifications: NotificationEntry[] = []
@@ -111,7 +112,7 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                     injected.expandedSummary,
                     plan.selection,
                     searchContext,
-                    ctx.state,
+                    sessionCtx.state,
                     ctx.config.compress.protectUserMessages,
                 )
 
@@ -119,13 +120,13 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                     summaryWithUsers,
                     plan.selection,
                     searchContext,
-                    ctx.state,
+                    sessionCtx.state,
                     ctx.config.compress.protectTags,
                 )
 
                 const summaryWithTools = await appendProtectedTools(
                     ctx.client,
-                    ctx.state,
+                    sessionCtx.state,
                     ctx.config.experimental.allowSubAgents,
                     summaryWithPromptInfo,
                     plan.selection,
@@ -150,15 +151,15 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                 })
             }
 
-            const runId = allocateRunId(ctx.state)
+            const runId = allocateRunId(sessionCtx.state)
 
             for (const preparedPlan of preparedPlans) {
-                const blockId = allocateBlockId(ctx.state)
+                const blockId = allocateBlockId(sessionCtx.state)
                 const storedSummary = wrapCompressedSummary(blockId, preparedPlan.finalSummary)
                 const summaryTokens = countTokens(storedSummary)
 
                 const applied = applyCompressionState(
-                    ctx.state,
+                    sessionCtx.state,
                     {
                         topic: input.topic,
                         batchTopic: input.topic,
@@ -187,7 +188,7 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                 })
             }
 
-            await finalizeSession(ctx, toolCtx, rawMessages, notifications, input.topic)
+            await finalizeSession(sessionCtx, toolCtx, rawMessages, notifications, input.topic)
 
             return `Compressed ${totalCompressedMessages} messages into ${COMPRESSED_BLOCK_HEADER}.`
         },

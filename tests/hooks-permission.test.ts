@@ -11,6 +11,7 @@ import {
 import { Logger } from "../lib/logger"
 import {
     createSessionState,
+    SessionStateStore,
     ensureSessionInitialized,
     refreshManualMode,
     saveManualModeSetting,
@@ -64,6 +65,7 @@ function buildConfig(permission: "allow" | "ask" | "deny" = "allow"): PluginConf
                 turns: 4,
                 protectedTools: [],
             },
+            staleTools: { enabled: false, turns: 3, protectedTools: [] },
         },
     }
 }
@@ -90,8 +92,11 @@ function buildMessage(id: string, role: "user" | "assistant", text: string): Wit
 }
 
 test("system prompt handler caches full model context for percentage thresholds", async () => {
-    const state = createSessionState()
-    const handler = createSystemPromptHandler(state, new Logger(false), buildConfig("deny"), {
+    const store = new SessionStateStore()
+    const state = await store.ensureInitialized("session-1", async (sessionState) => {
+        sessionState.sessionId = "session-1"
+    })
+    const handler = createSystemPromptHandler(store, new Logger(false), buildConfig("deny"), {
         reload() {},
         getRuntimePrompts() {
             return {} as any
@@ -111,16 +116,16 @@ test("system prompt handler caches full model context for percentage thresholds"
         { system: ["base system"] },
     )
 
-    assert.equal(state.modelContextLimit, 200000)
+    assert.equal(store.peek("session-1")?.modelContextLimit, 200000)
 })
 
 test("chat message transform strips hallucinated tags even when compress is denied", async () => {
-    const state = createSessionState()
+    const store = new SessionStateStore()
     const logger = new Logger(false)
     const config = buildConfig("deny")
     const handler = createChatMessageTransformHandler(
         { session: { get: async () => ({}) } } as any,
-        state,
+        store,
         logger,
         config,
         {
@@ -142,12 +147,12 @@ test("chat message transform strips hallucinated tags even when compress is deni
 })
 
 test("chat message transform drops messages without info instead of crashing", async () => {
-    const state = createSessionState()
+    const store = new SessionStateStore()
     const logger = new Logger(false)
     const config = buildConfig("deny")
     const handler = createChatMessageTransformHandler(
         { session: { get: async () => ({}) } } as any,
-        state,
+        store,
         logger,
         config,
         {
@@ -175,7 +180,6 @@ test("chat message transform drops messages without info instead of crashing", a
 
     await handler({}, output as any)
 
-    assert.equal(state.sessionId, null)
     assert.equal(output.messages.length, 0)
 })
 
@@ -191,7 +195,7 @@ test("command execute exits after effective permission resolves to deny", async 
                 },
             },
         } as any,
-        createSessionState(),
+        new SessionStateStore(),
         new Logger(false),
         buildConfig("deny"),
         "/tmp",
@@ -214,9 +218,10 @@ test("text complete strips hallucinated metadata tags", async () => {
 })
 
 test("event hook attaches durations to matching blocks by message and call id", async () => {
-    const state = createSessionState()
+    const store = new SessionStateStore()
+    const state = store.get("session-1")
     state.sessionId = "session-1"
-    const handler = createEventHandler(state, new Logger(false))
+    const handler = createEventHandler(store, new Logger(false))
     const originalNow = Date.now
     Date.now = () => 100
 
@@ -407,9 +412,10 @@ test("event hook attaches durations to matching blocks by message and call id", 
 })
 
 test("event hook falls back to completed runtime when running duration missing", async () => {
-    const state = createSessionState()
+    const store = new SessionStateStore()
+    const state = store.get("session-1")
     state.sessionId = "session-1"
-    const handler = createEventHandler(state, new Logger(false))
+    const handler = createEventHandler(store, new Logger(false))
 
     state.prune.messages.blocksById.set(1, {
         blockId: 1,
@@ -498,9 +504,10 @@ test("event hook queues duration updates until the matching session is loaded", 
     })
     await saveSessionState(persistedState, logger)
 
-    const liveState = createSessionState()
+    const store = new SessionStateStore()
+    const liveState = store.get(otherSessionId)
     liveState.sessionId = otherSessionId
-    const handler = createEventHandler(liveState, logger)
+    const handler = createEventHandler(store, logger)
 
     await handler({
         event: {
@@ -546,8 +553,9 @@ test("event hook queues duration updates until the matching session is loaded", 
         },
     })
 
-    assert.equal(liveState.compressionTiming.pendingByCallId.has("message-1:call-remote"), true)
-    assert.equal(liveState.compressionTiming.startsByCallId.has("message-1:call-remote"), false)
+    const targetState = store.peek(targetSessionId)!
+    assert.equal(targetState.compressionTiming.pendingByCallId.has("message-1:call-remote"), true)
+    assert.equal(targetState.compressionTiming.startsByCallId.has("message-1:call-remote"), false)
 
     await ensureSessionInitialized(
         {
@@ -555,7 +563,7 @@ test("event hook queues duration updates until the matching session is loaded", 
                 get: async () => ({ data: { parentID: null } }),
             },
         } as any,
-        liveState,
+        targetState,
         targetSessionId,
         logger,
         [
@@ -573,14 +581,15 @@ test("event hook queues duration updates until the matching session is loaded", 
         false,
     )
 
-    assert.equal(liveState.prune.messages.blocksById.get(1)?.durationMs, 250)
-    assert.equal(liveState.compressionTiming.pendingByCallId.has("message-1:call-remote"), false)
+    assert.equal(targetState.prune.messages.blocksById.get(1)?.durationMs, 250)
+    assert.equal(targetState.compressionTiming.pendingByCallId.has("message-1:call-remote"), false)
 })
 
 test("event hook keeps same call id distinct across message ids", async () => {
-    const state = createSessionState()
+    const store = new SessionStateStore()
+    const state = store.get("session-1")
     state.sessionId = "session-1"
-    const handler = createEventHandler(state, new Logger(false))
+    const handler = createEventHandler(store, new Logger(false))
 
     state.prune.messages.blocksById.set(1, {
         blockId: 1,
