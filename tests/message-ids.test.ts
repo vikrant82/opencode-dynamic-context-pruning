@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { Logger } from "../lib/logger"
 import { assignMessageRefs } from "../lib/message-ids"
-import { checkSession, createSessionState, type WithParts } from "../lib/state"
+import { checkSession, SessionStateStore, type WithParts } from "../lib/state"
 
 function textPart(messageID: string, sessionID: string, id: string, text: string) {
     return {
@@ -61,17 +61,20 @@ function buildCompactedMessages(sessionID: string): WithParts[] {
 test("checkSession resets message id aliases after native compaction", async () => {
     const sessionID = `ses_message_ids_after_compaction_${Date.now()}`
     const messages = buildCompactedMessages(sessionID)
-    const state = createSessionState()
+    const store = new SessionStateStore()
     const logger = new Logger(false)
 
-    state.sessionId = sessionID
+    const state = await store.ensureInitialized(sessionID, async (sessionState) => {
+        sessionState.sessionId = sessionID
+        sessionState.lastCompaction = 1
+    })
     state.messageIds.byRawId.set("old-message-9998", "m9998")
     state.messageIds.byRawId.set("old-message-9999", "m9999")
     state.messageIds.byRef.set("m9998", "old-message-9998")
     state.messageIds.byRef.set("m9999", "old-message-9999")
     state.messageIds.nextRef = 9999
 
-    await checkSession({} as any, state, logger, messages, false)
+    await checkSession({} as any, store, logger, messages, false)
 
     assert.equal(state.lastCompaction, 2)
     assert.equal(state.messageIds.byRawId.size, 0)

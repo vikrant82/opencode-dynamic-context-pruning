@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { mkdirSync } from "node:fs"
 import { createCompressRangeTool } from "../lib/compress/range"
-import { createSessionState, type WithParts } from "../lib/state"
+import { createSessionState, SessionStateStore, type WithParts } from "../lib/state"
 import type { PluginConfig } from "../lib/config"
 import { Logger } from "../lib/logger"
 
@@ -127,11 +127,7 @@ function buildMessages(sessionID: string): WithParts[] {
 test("compress range rebuilds subagent message refs after session state was reset", async () => {
     const sessionID = `ses_subagent_compress_${Date.now()}`
     const rawMessages = buildMessages(sessionID)
-    const state = createSessionState()
-    state.sessionId = "ses_other"
-    state.messageIds.byRawId.set("other-message", "m0001")
-    state.messageIds.byRef.set("m0001", "other-message")
-    state.messageIds.nextRef = 2
+    const store = new SessionStateStore()
 
     const logger = new Logger(false)
     const tool = createCompressRangeTool({
@@ -141,7 +137,8 @@ test("compress range rebuilds subagent message refs after session state was rese
                 get: async () => ({ data: { parentID: "ses_parent" } }),
             },
         },
-        state,
+        state: createSessionState(),
+        stateStore: store,
         logger,
         config: buildConfig(),
         prompts: {
@@ -171,6 +168,7 @@ test("compress range rebuilds subagent message refs after session state was rese
         },
     )
 
+    const state = store.peek(sessionID)!
     assert.equal(result, "Compressed 2 messages into [Compressed conversation section].")
     assert.equal(state.sessionId, sessionID)
     assert.equal(state.isSubAgent, true)

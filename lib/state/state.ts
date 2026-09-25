@@ -13,35 +13,35 @@ import {
     collectTurnNudgeAnchors,
 } from "./utils"
 import { getLastUserMessage } from "../messages/query"
+import type { SessionStateStore } from "./store"
 
 export const checkSession = async (
     client: any,
-    state: SessionState,
+    store: SessionStateStore,
     logger: Logger,
     messages: WithParts[],
     manualModeDefault: boolean,
-): Promise<void> => {
+): Promise<SessionState | null> => {
     const lastUserMessage = getLastUserMessage(messages)
-    if (!lastUserMessage) {
-        return
-    }
+    const lastSessionId =
+        lastUserMessage?.info.sessionID ??
+        messages.find((message) => message.info?.sessionID)?.info.sessionID
+    if (!lastSessionId) return null
 
-    const lastSessionId = lastUserMessage.info.sessionID
-
-    if (state.sessionId === null || state.sessionId !== lastSessionId) {
-        logger.info(`Session changed: ${state.sessionId} -> ${lastSessionId}`)
-        try {
-            await ensureSessionInitialized(
+    const state = store.get(lastSessionId)
+    try {
+        await store.ensureInitialized(lastSessionId, (sessionState) =>
+            ensureSessionInitialized(
                 client,
-                state,
+                sessionState,
                 lastSessionId,
                 logger,
                 messages,
                 manualModeDefault,
-            )
-        } catch (err: any) {
-            logger.error("Failed to initialize session state", { error: err.message })
-        }
+            ),
+        )
+    } catch (err: any) {
+        logger.error("Failed to initialize session state", { error: err.message })
     }
 
     const lastCompactionTimestamp = findLastCompactionTimestamp(messages)
@@ -61,6 +61,7 @@ export const checkSession = async (
 
     state.currentTurn = countTurns(state, messages)
     await refreshManualMode(state, lastSessionId, logger, manualModeDefault)
+    return state
 }
 
 export function createSessionState(): SessionState {

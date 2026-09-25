@@ -56,15 +56,16 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
                     ? (toolCtx as unknown as { callID: string }).callID
                     : undefined
 
-            const { rawMessages, searchContext } = await prepareSession(
+            const { rawMessages, searchContext, state } = await prepareSession(
                 ctx,
                 toolCtx,
                 `Compress Message: ${input.topic}`,
             )
+            const sessionCtx = { ...ctx, state: state ?? ctx.state! }
             const { plans, skippedIssues, skippedCount } = resolveMessages(
                 input,
                 searchContext,
-                ctx.state,
+                sessionCtx.state,
                 ctx.config,
             )
 
@@ -84,13 +85,13 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
                     plan.entry.summary,
                     plan.selection,
                     searchContext,
-                    ctx.state,
+                    sessionCtx.state,
                     ctx.config.compress.protectTags,
                 )
 
                 const summaryWithTools = await appendProtectedTools(
                     ctx.client,
-                    ctx.state,
+                    sessionCtx.state,
                     ctx.config.experimental.allowSubAgents,
                     summaryWithPromptInfo,
                     plan.selection,
@@ -105,15 +106,15 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
                 })
             }
 
-            const runId = allocateRunId(ctx.state)
+            const runId = allocateRunId(sessionCtx.state)
 
             for (const { plan, summaryWithTools } of preparedPlans) {
-                const blockId = allocateBlockId(ctx.state)
+                const blockId = allocateBlockId(sessionCtx.state)
                 const storedSummary = wrapCompressedSummary(blockId, summaryWithTools)
                 const summaryTokens = countTokens(storedSummary)
 
                 applyCompressionState(
-                    ctx.state,
+                    sessionCtx.state,
                     {
                         topic: plan.entry.topic,
                         batchTopic: input.topic,
@@ -140,7 +141,7 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
                 })
             }
 
-            await finalizeSession(ctx, toolCtx, rawMessages, notifications, input.topic)
+            await finalizeSession(sessionCtx, toolCtx, rawMessages, notifications, input.topic)
 
             return formatResult(plans.length, skippedIssues, skippedCount)
         },

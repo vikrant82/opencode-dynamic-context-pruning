@@ -3,12 +3,14 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { buildPruneConfig, testLogger } from "./prune-helpers"
 import { createCommandExecuteHandler } from "../lib/hooks"
-import { createSessionState } from "../lib/state"
+import { SessionStateStore } from "../lib/state"
 import { loadSessionState } from "../lib/state/persistence"
 
 function makeHandler(sent: string[], messages: any[] = []) {
-    const state = createSessionState()
+    const store = new SessionStateStore()
+    const state = store.get("session-dispatch")
     state.currentTurn = 200
+    state.sessionId = "session-dispatch"
     const handler = createCommandExecuteHandler(
         {
             session: {
@@ -22,13 +24,13 @@ function makeHandler(sent: string[], messages: any[] = []) {
                 },
             },
         } as any,
-        state,
+        store,
         testLogger(),
         buildPruneConfig(),
         "/tmp",
         { global: undefined, agents: {} },
     )
-    return { state, handler }
+    return { store, handler }
 }
 
 async function runSubcommand(handler: any, arguments_: string, sessionID = "session-dispatch") {
@@ -110,7 +112,7 @@ test("prune preview persists across real handler recreation and top-5 inherits -
             "call_tail",
         ],
     )
-    assert.equal(first.state.prune.tools.size, 0)
+    assert.equal(first.store.peek(lifecycleSessionID)?.prune.tools.size, 0)
     assert.equal(
         persistedPreview?.prune.tools && Object.keys(persistedPreview.prune.tools).length,
         0,
@@ -128,14 +130,15 @@ test("prune preview persists across real handler recreation and top-5 inherits -
     assert.ok(!secondSent.join("\n").includes("No saved prune preview"))
 
     const expectedIds = ["call_question", "call_edit", "call_bash", "call_grep", "call_glob"]
-    assert.deepEqual(second.state.prune.batches[0]?.toolIds, expectedIds)
-    assert.deepEqual([...second.state.prune.tools.keys()].sort(), [...expectedIds].sort())
-    assert.ok(second.state.prune.explicitTools.has("call_question"))
-    assert.ok(second.state.prune.explicitTools.has("call_edit"))
-    assert.ok(!second.state.prune.tools.has("call_read"))
-    assert.ok(!second.state.prune.tools.has("call_tail"))
-    assert.equal(second.state.prune.batches[0]?.selector, "older-than 1, tools: *, top: 5")
-    assert.equal(second.state.prune.preview, null)
+    const appliedState = second.store.peek(lifecycleSessionID)!
+    assert.deepEqual(appliedState.prune.batches[0]?.toolIds, expectedIds)
+    assert.deepEqual([...appliedState.prune.tools.keys()].sort(), [...expectedIds].sort())
+    assert.ok(appliedState.prune.explicitTools.has("call_question"))
+    assert.ok(appliedState.prune.explicitTools.has("call_edit"))
+    assert.ok(!appliedState.prune.tools.has("call_read"))
+    assert.ok(!appliedState.prune.tools.has("call_tail"))
+    assert.equal(appliedState.prune.batches[0]?.selector, "older-than 1, tools: *, top: 5")
+    assert.equal(appliedState.prune.preview, null)
     const persistedApply = await loadSessionState(lifecycleSessionID, testLogger())
     assert.equal(persistedApply?.prune.preview, null)
     assert.deepEqual(persistedApply?.prune.batches?.[0]?.toolIds, expectedIds)
@@ -166,11 +169,11 @@ test("prune apply without a saved preview fails closed", async () => {
         info: { ...message.info, sessionID },
     }))
     const sent: string[] = []
-    const { state, handler } = makeHandler(sent, messages)
+    const { store, handler } = makeHandler(sent, messages)
     const result = await runSubcommand(handler, "prune --older-than 1 --top-5", sessionID)
     assert.equal(result.thrown, "__DCP_PRUNE_HANDLED__")
-    assert.equal(state.prune.tools.size, 0)
-    assert.equal(state.prune.batches.length, 0)
+    assert.equal(store.peek(sessionID)?.prune.tools.size, 0)
+    assert.equal(store.peek(sessionID)?.prune.batches.length, 0)
     assert.ok(sent.join("\n").includes("No saved prune preview"))
 })
 
