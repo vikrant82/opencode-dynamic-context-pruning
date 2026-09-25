@@ -48,6 +48,11 @@ function buildConfig(mode: "message" | "range" = "message"): PluginConfig {
             protectUserMessages: false,
         },
         strategies: {
+            staleTools: {
+                enabled: false,
+                turns: 3,
+                protectedTools: [],
+            },
             deduplication: {
                 enabled: true,
                 protectedTools: [],

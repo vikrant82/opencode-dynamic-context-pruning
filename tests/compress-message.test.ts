@@ -782,9 +782,9 @@ test("compress message mode sends one aggregated notification for batched messag
     assert.equal(toastCalls.length, 1)
     assert.match(toastCalls[0] || "", /▣ DCP \| -[^,\n]+ removed, \+[^\s\n]+ summary/)
     assert.match(toastCalls[0] || "", /Compression #1/)
-    assert.match(toastCalls[0] || "", /▣ Compression #1 -[^,\n]+ removed, \+[^\s\n]+ summary/)
-    assert.match(toastCalls[0] || "", /Topic: Batch stale notes/)
-    assert.match(toastCalls[0] || "", /Items: 2 messages/)
+    assert.match(toastCalls[0] || "", /▣ Compression #1 — "Batch stale notes"/)
+    assert.match(toastCalls[0] || "", /-[^,\n]+ removed, \+[^\s\n]+ summary/)
+    assert.match(toastCalls[0] || "", /2 messages/)
 })
 
 test("compress message mode skips messages that are already actively compressed", async () => {
