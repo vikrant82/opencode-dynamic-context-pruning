@@ -333,7 +333,7 @@ next request; stored session history is never touched, and `/dcp unprune` revert
 /dcp prune --older-than 150 --dry-run                             # preview candidates + estimated savings
 /dcp prune --older-than 150 --reasoning                           # prune tools and eligible prior reasoning
 /dcp prune --older-than 150 --reasoning --dry-run                 # preview both; reasoning is all-or-nothing
-/dcp prune all                                                    # one-step: top 5 tools + all eligible reasoning (age ≥1)
+/dcp prune all                                                    # one-step: unprotected top 5 tools + all eligible reasoning (age ≥1)
 /dcp prune all --older-than 10 --top-3 --tools bash               # one-step with overrides
 /dcp prune all --dry-run                                          # preview only, marks selected tool rows
 /dcp unprune                                                      # revert the last prune batch
@@ -354,9 +354,11 @@ value is rejected. Its selected call IDs stay fixed even if eligible-call rankin
 the command rejects the selection if any ID is unavailable.
 For `--top-N`, a matching saved preview is respected; otherwise current eligible rows are ranked fresh. `--indexes` always requires a saved preview. Rerun `--dry-run` to update the preview. Pruning without an index selector remains supported. `/dcp prune all` rejects `--indexes`.
 
+`/dcp prune all` selects tools as if `--tools '*'` were specified, so it ignores configured tool protections and the built-in `question`, `edit`, and `write` skips. An explicit `--tools <globs>` replaces that default. Use `/dcp prune --older-than N --top-5` for top-five selection that respects protections.
+
 Notes:
 
-- `question`, `edit`, and `write` outputs are skipped unless explicitly selected via `--tools`.
+- `question`, `edit`, and `write` outputs are skipped unless explicitly selected via `--tools`; `/dcp prune all` ignores these and configured tool protections.
 - Tools already inside active compression blocks, or already pruned, are skipped (reported).
 - Prune batches persist with the session state; undo survives restarts.
 - `--reasoning` selects every eligible old reasoning part as one oldest-first prefix; it ignores `--indexes`/`--top-N` row selection and never removes reasoning after the latest user message (active tool loop protection).

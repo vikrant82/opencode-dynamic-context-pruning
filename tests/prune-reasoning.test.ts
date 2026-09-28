@@ -51,6 +51,73 @@ test("reasoning candidate eligibility observes age, existing marks, compaction, 
     assert.deepEqual(resolveReasoningCandidates(state, messages, 1), [])
 })
 
+test("ignored DCP notifications do not move the real-user reasoning boundary", () => {
+    const state = buildState(10)
+    const priorUser = message("prior-user", "user", [{ type: "text", text: "start" }])
+    const assistant = message("assistant", "assistant", [
+        { type: "step-start" },
+        { type: "reasoning", id: "r_old", text: "old reasoning" },
+        { type: "step-finish", tokens: { reasoning: 12 } },
+    ])
+    const notification = message("notification", "user", [
+        { type: "text", text: "╭─── DCP Prune ───╮", ignored: true },
+    ])
+    const messagesWithNotification = [priorUser, assistant, notification]
+    assert.deepEqual(resolveReasoningCandidates(state, messagesWithNotification, 1), [])
+    state.prune.reasoning.set("r_old", 12)
+    const outboundWithNotification = messagesWithNotification.map((msg) => ({
+        ...msg,
+        parts: msg.parts.map((part) => ({ ...part })),
+    }))
+    pruneReasoning(state, outboundWithNotification)
+    assert.deepEqual(outboundWithNotification[1].parts, assistant.parts)
+
+    const genuineUser = message("genuine-user", "user", [{ type: "text", text: "continue" }])
+    assert.deepEqual(
+        resolveReasoningCandidates(state, [priorUser, assistant, notification, genuineUser], 1),
+        [],
+    )
+    state.prune.reasoning.clear()
+    assert.deepEqual(
+        resolveReasoningCandidates(state, [priorUser, assistant, notification, genuineUser], 1),
+        [{ id: "r_old", tokenCount: 12, providerReported: true }],
+    )
+    state.prune.reasoning.set("r_old", 12)
+    const outboundWithGenuineUser = [
+        priorUser,
+        { ...assistant, parts: assistant.parts.map((part) => ({ ...part })) },
+        notification,
+        genuineUser,
+    ]
+    pruneReasoning(state, outboundWithGenuineUser)
+    assert.deepEqual(outboundWithGenuineUser[1].parts, [
+        { type: "step-start" },
+        { type: "step-finish", tokens: { reasoning: 12 } },
+    ])
+})
+
+test("reasoning requires a real user boundary and remains intact without one", () => {
+    const state = buildState(10)
+    const assistant = message("assistant", "assistant", [
+        { type: "step-start" },
+        { type: "reasoning", id: "r_orphan", text: "reasoning without user" },
+        { type: "step-finish", tokens: { reasoning: 12 } },
+    ])
+    state.prune.reasoning.set("r_orphan", 12)
+    const notification = message("notification", "user", [
+        { type: "text", text: "DCP notification", ignored: true },
+    ])
+    for (const messages of [[assistant], [assistant, notification]]) {
+        assert.deepEqual(resolveReasoningCandidates(state, messages, 1), [])
+        const outbound = messages.map((msg) => ({
+            ...msg,
+            parts: msg.parts.map((part) => ({ ...part })),
+        }))
+        pruneReasoning(state, outbound)
+        assert.deepEqual(outbound[0].parts, assistant.parts)
+    }
+})
+
 test("reasoning-only commit is persisted and fresh outbound copies lose only selected reasoning", async () => {
     const state = buildState(10)
     activeSessionId = state.sessionId!

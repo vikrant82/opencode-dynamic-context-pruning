@@ -96,6 +96,22 @@ test("already-pruned tools are skipped and reported", () => {
     assert.equal(res.skips.alreadyPruned, 1)
 })
 
+test("already-pruned protected tools are classified only as already pruned", () => {
+    const state = buildState(200)
+    addTool(state, "read-call", "read", { turn: 10 })
+    state.prune.tools.set("read-call", 100)
+    const res = resolvePruneCandidates(
+        state,
+        buildPruneConfig({ protectedTools: ["read"] }),
+        noMessages,
+        { olderThan: 100 },
+    )
+    assert.deepEqual(res.candidates, [])
+    assert.equal(res.skips.alreadyPruned, 1)
+    assert.equal(res.skips.protected, 0)
+    assert.equal(res.skips.builtinSkip, 0)
+})
+
 test("youngestEligibleAge tracks status-eligible entries", () => {
     const state = buildState(200)
     addTool(state, "call_a", "bash", { turn: 50 }) // age 150

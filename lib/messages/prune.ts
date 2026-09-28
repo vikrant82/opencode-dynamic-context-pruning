@@ -3,7 +3,7 @@ import type { Logger } from "../logger"
 import type { PluginConfig } from "../config"
 import { isMessageCompacted } from "../state/utils"
 import { createSyntheticUserMessage, replaceBlockIdsWithBlocked } from "./utils"
-import { getLastUserMessage } from "./query"
+import { getLastRealUserMessageIndex, getLastUserMessage } from "./query"
 import type { UserMessage } from "@opencode-ai/sdk/v2"
 import { deduplicate, purgeErrors, staleTools } from "../strategies"
 
@@ -35,8 +35,8 @@ export const prune = (
 
 /** Remove manually selected reasoning blocks from outbound assistant messages only. */
 export function pruneReasoning(state: SessionState, messages: WithParts[]): void {
-    const lastUserMessage = getLastUserMessage(messages)
-    const lastUserIndex = lastUserMessage ? messages.indexOf(lastUserMessage) : messages.length
+    const lastUserIndex = getLastRealUserMessageIndex(messages)
+    if (lastUserIndex < 0) return
     for (let messageIndex = 0; messageIndex < lastUserIndex; messageIndex++) {
         const msg = messages[messageIndex]
         if (msg.info.role !== "assistant" || isMessageCompacted(state, msg)) continue

@@ -56,9 +56,55 @@ test("reasoning-only selection prunes reasoning without tool rows", async () => 
     await handlePruneCommand(ctx)
     assert.deepEqual([...ctx.state.prune.reasoning], [["r_old", 31]])
     assert.equal(ctx.state.prune.tools.size, 0)
+    assert.equal(ctx.state.prune.batches.length, 0)
     assert.ok(
         sent.join("\n").includes("Pruned 1 reasoning part(s), ~31 tokens (provider-reported)"),
     )
+    assert.ok(!sent.join("\n").includes("Pruned 0 tool(s)"))
+    assert.ok(!sent.join("\n").includes("/dcp unprune = revert this batch"))
+})
+
+test("nothing-to-prune commit reports the empty result without changing state", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "150"])
+    const before = {
+        batches: [...ctx.state.prune.batches],
+        tools: [...ctx.state.prune.tools],
+        notified: [...ctx.state.prune.notifiedToolIds],
+        stats: { ...ctx.state.stats },
+    }
+    await handlePruneCommand(ctx)
+    assert.deepEqual(ctx.state.prune.batches, before.batches)
+    assert.deepEqual([...ctx.state.prune.tools], before.tools)
+    assert.deepEqual([...ctx.state.prune.notifiedToolIds], before.notified)
+    assert.deepEqual(ctx.state.stats, before.stats)
+    assert.ok(sent.join("\n").includes("Nothing to prune: no eligible tools or reasoning parts."))
+    assert.ok(!sent.join("\n").includes("Pruned 0 tool(s)"))
+    assert.ok(!sent.join("\n").includes("/dcp unprune = revert this batch"))
+})
+
+test("prune all with no eligible items preserves the saved preview", async () => {
+    const { ctx, sent } = makeCtx(["all"])
+    ctx.state.prune.preview = {
+        olderThan: 7,
+        toolGlobs: ["read"],
+        groups: [{ tool: "read", ids: ["saved-call"] }],
+    }
+    const before = structuredClone(ctx.state.prune.preview)
+    await handlePruneCommand(ctx)
+    assert.deepEqual(ctx.state.prune.preview, before)
+    assert.ok(sent.join("\n").includes("Nothing to prune"))
+})
+
+test("reasoning-only dry-run describes tools as unselected and marks reasoning as one-way", async () => {
+    const { ctx, sent } = makeReasoningCtx(["--older-than", "2", "--reasoning", "--dry-run"])
+    await handlePruneCommand(ctx)
+    const out = sent.join("\n")
+    assert.ok(out.includes("Tools: not selected (add --tools, --top-N, or use /dcp prune all)"))
+    assert.ok(out.includes("Run without --dry-run to apply · reasoning pruning is one-way"))
+    assert.ok(!out.includes("Eligible:"))
+    assert.ok(!out.includes("Skipped:"))
+    assert.ok(!out.includes("Estimated savings:"))
+    assert.equal(ctx.state.prune.batches.length, 0)
 })
 
 test("reasoning flag is required for reasoning selection and dry-run always reports potential", async () => {
@@ -154,6 +200,10 @@ test("prune all defaults to top-five and commits reasoning without prior preview
     assert.deepEqual([...ctx.state.prune.reasoning.keys()], ["r_old"])
     assert.ok(sent.join("\n").includes("Pruned 5 tool(s)"))
     assert.ok(sent.join("\n").includes("Pruned 1 reasoning part(s)"))
+    assert.ok(sent.join("\n").includes("DCP Prune (all) — selection"))
+    assert.ok(sent.join("\n").includes("tool6                    ×  1   ~60 tok ←"))
+    assert.ok(!sent.join("\n").includes("DCP Prune (dry-run)"))
+    assert.ok(!sent.join("\n").includes("Run without --dry-run"))
 })
 
 test("prune all honors age, top-N, and explicit tool-glob overrides on commit", async () => {
@@ -164,6 +214,58 @@ test("prune all honors age, top-N, and explicit tool-glob overrides on commit", 
     assert.deepEqual([...ctx.state.prune.tools.keys()], ["bash-old"])
     assert.ok(ctx.state.prune.reasoning.has("r_old"))
     assert.equal(ctx.state.prune.batches[0].selector, "older-than 2, tools: bash, top: 1")
+})
+
+test("prune all defaults to unprotected top-five; explicit globs still replace that set", async () => {
+    const { ctx, sent } = makeCtx(["all"], { protectedTools: ["read"] })
+    addTool(ctx.state, "read-call", "read", { turn: 1, tokenCount: 100 })
+    addTool(ctx.state, "edit-call", "edit", { turn: 1, tokenCount: 90 })
+    addTool(ctx.state, "extra-1", "tool1", { turn: 1, tokenCount: 80 })
+    addTool(ctx.state, "extra-2", "tool2", { turn: 1, tokenCount: 70 })
+    addTool(ctx.state, "extra-3", "tool3", { turn: 1, tokenCount: 60 })
+    addTool(ctx.state, "extra-4", "tool4", { turn: 1, tokenCount: 50 })
+    addTool(ctx.state, "bash-call", "bash", { turn: 1, tokenCount: 20 })
+    await handlePruneCommand(ctx)
+    assert.deepEqual([...ctx.state.prune.tools.keys()].sort(), [
+        "edit-call",
+        "extra-1",
+        "extra-2",
+        "extra-3",
+        "read-call",
+    ])
+    assert.ok(sent.join("\n").includes("read                     ×  1   ~100 tok ←"))
+    assert.ok(sent.join("\n").includes("edit                     ×  1   ~90 tok ←"))
+
+    const explicit = makeCtx(["all", "--tools", "bash"], { protectedTools: ["read"] })
+    addTool(explicit.ctx.state, "read-call", "read", { turn: 1, tokenCount: 100 })
+    addTool(explicit.ctx.state, "edit-call", "edit", { turn: 1, tokenCount: 90 })
+    addTool(explicit.ctx.state, "bash-call", "bash", { turn: 1, tokenCount: 20 })
+    await handlePruneCommand(explicit.ctx)
+    assert.deepEqual([...explicit.ctx.state.prune.tools.keys()], ["bash-call"])
+})
+
+test("prune all dry-run selects protected and built-in tools by size", async () => {
+    const { ctx, sent } = makeCtx(["all", "--dry-run"], { protectedTools: ["read"] })
+    addTool(ctx.state, "read-call", "read", { turn: 1, tokenCount: 100 })
+    addTool(ctx.state, "edit-call", "edit", { turn: 1, tokenCount: 90 })
+    addTool(ctx.state, "bash-call", "bash", { turn: 1, tokenCount: 20 })
+    await handlePruneCommand(ctx)
+    const out = sent.join("\n")
+    assert.ok(out.includes("DCP Prune (dry-run)"))
+    assert.ok(out.includes("read                     ×  1   ~100 tok ←"))
+    assert.ok(out.includes("edit                     ×  1   ~90 tok ←"))
+    assert.ok(!out.includes("read                     ×  1   ~100 tok\n"))
+    assert.equal(ctx.state.prune.tools.size, 0)
+    assert.equal(ctx.state.prune.batches.length, 0)
+})
+
+test("plain --top-N without --tools continues to respect protections", async () => {
+    const { ctx } = makeCtx(["--older-than", "1", "--top-5"], { protectedTools: ["read"] })
+    addTool(ctx.state, "read-call", "read", { turn: 1, tokenCount: 100 })
+    addTool(ctx.state, "edit-call", "edit", { turn: 1, tokenCount: 90 })
+    addTool(ctx.state, "bash-call", "bash", { turn: 1, tokenCount: 20 })
+    await handlePruneCommand(ctx)
+    assert.deepEqual([...ctx.state.prune.tools.keys()], ["bash-call"])
 })
 
 test("prune all honors selector overrides and dry-run remains non-mutating", async () => {
