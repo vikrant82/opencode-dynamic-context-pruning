@@ -162,7 +162,7 @@ test("default prune preview excludes built-in question and edit tools", async ()
     )
 })
 
-test("prune apply without a saved preview fails closed", async () => {
+test("top-N prune without a saved preview selects fresh ranked rows", async () => {
     const sessionID = `${lifecycleSessionID}-missing-preview`
     const messages = lifecycleMessages().map((message) => ({
         ...message,
@@ -172,9 +172,8 @@ test("prune apply without a saved preview fails closed", async () => {
     const { store, handler } = makeHandler(sent, messages)
     const result = await runSubcommand(handler, "prune --older-than 1 --top-5", sessionID)
     assert.equal(result.thrown, "__DCP_PRUNE_HANDLED__")
-    assert.equal(store.peek(sessionID)?.prune.tools.size, 0)
-    assert.equal(store.peek(sessionID)?.prune.batches.length, 0)
-    assert.ok(sent.join("\n").includes("No saved prune preview"))
+    assert.equal(store.peek(sessionID)?.prune.tools.size, 5)
+    assert.equal(store.peek(sessionID)?.prune.batches.length, 1)
 })
 
 const handledCases: Array<{ arguments_: string; marker: string }> = [

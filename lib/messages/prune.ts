@@ -26,10 +26,24 @@ export const prune = (
     filterCompressedRanges(state, logger, config, messages)
     // pruneFullTool(state, logger, messages)
     const prunedToolIds = pruneToolOutputs(state, logger, messages)
+    pruneReasoning(state, messages)
     pruneToolInputs(state, logger, messages)
     pruneToolErrors(state, logger, messages)
 
     return prunedToolIds
+}
+
+/** Remove manually selected reasoning blocks from outbound assistant messages only. */
+export function pruneReasoning(state: SessionState, messages: WithParts[]): void {
+    const lastUserMessage = getLastUserMessage(messages)
+    const lastUserIndex = lastUserMessage ? messages.indexOf(lastUserMessage) : messages.length
+    for (let messageIndex = 0; messageIndex < lastUserIndex; messageIndex++) {
+        const msg = messages[messageIndex]
+        if (msg.info.role !== "assistant" || isMessageCompacted(state, msg)) continue
+        msg.parts = msg.parts.filter(
+            (part) => part.type !== "reasoning" || !state.prune.reasoning.has((part as any).id),
+        )
+    }
 }
 
 const pruneFullTool = (state: SessionState, logger: Logger, messages: WithParts[]): void => {

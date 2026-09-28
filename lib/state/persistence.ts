@@ -31,6 +31,7 @@ export interface PersistedPruneMessagesState {
 
 export interface PersistedPrune {
     tools?: Record<string, number>
+    reasoning?: Record<string, number>
     messages?: PersistedPruneMessagesState
     explicitTools?: string[]
     notifiedToolIds?: string[]
@@ -103,6 +104,7 @@ export async function saveSessionState(
             manualMode: !!sessionState.manualMode,
             prune: {
                 tools: Object.fromEntries(sessionState.prune.tools),
+                reasoning: Object.fromEntries(sessionState.prune.reasoning),
                 messages: serializePruneMessagesState(sessionState.prune.messages),
                 explicitTools: Array.from(sessionState.prune.explicitTools),
                 notifiedToolIds: Array.from(sessionState.prune.notifiedToolIds),
@@ -225,6 +227,7 @@ function emptyPersistedState(manualMode: boolean): PersistedSessionState {
         manualMode,
         prune: {
             tools: {},
+            reasoning: {},
             messages: {
                 byMessageId: {},
                 blocksById: {},

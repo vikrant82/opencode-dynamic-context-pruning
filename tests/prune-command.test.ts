@@ -47,6 +47,218 @@ test("parsePruneArgs: valid full invocation", () => {
     assert.equal(parsed.dryRun, true)
 })
 
+test("parsePruneArgs accepts reasoning as a separate selection flag", () => {
+    assert.equal(parsePruneArgs(["--older-than", "10", "--reasoning"]).reasoning, true)
+})
+
+test("reasoning-only selection prunes reasoning without tool rows", async () => {
+    const { ctx, sent } = makeReasoningCtx(["--older-than", "2", "--reasoning"])
+    await handlePruneCommand(ctx)
+    assert.deepEqual([...ctx.state.prune.reasoning], [["r_old", 31]])
+    assert.equal(ctx.state.prune.tools.size, 0)
+    assert.ok(
+        sent.join("\n").includes("Pruned 1 reasoning part(s), ~31 tokens (provider-reported)"),
+    )
+})
+
+test("reasoning flag is required for reasoning selection and dry-run always reports potential", async () => {
+    const { ctx, sent } = makeReasoningCtx(["--older-than", "2", "--dry-run"])
+    await handlePruneCommand(ctx)
+    assert.equal(ctx.state.prune.reasoning.size, 0)
+    assert.ok(
+        sent.join("\n").includes("Reasoning potential: 1 part(s), ~31 tok (provider-reported)"),
+    )
+    assert.ok(sent.join("\n").includes("not selected; add --reasoning"))
+})
+
+test("reasoning dry-run reports no eligible parts without a zero-token source label", async () => {
+    const { ctx, sent } = makeReasoningCtx(["--older-than", "20", "--dry-run"])
+    await handlePruneCommand(ctx)
+    assert.ok(
+        sent
+            .join("\n")
+            .includes(
+                "Reasoning: no eligible parts older than 20 steps — add --reasoning to select",
+            ),
+    )
+})
+
+test("reasoning dry-run labels a zero provider count with text fallback as estimated", async () => {
+    const { ctx, sent } = makeReasoningCtx(
+        ["--older-than", "2", "--dry-run"],
+        [
+            { type: "reasoning", id: "r_zero", text: "12345678" },
+            { type: "step-finish", tokens: { reasoning: 0 } },
+        ],
+    )
+    await handlePruneCommand(ctx)
+    assert.ok(sent.join("\n").includes("Reasoning potential: 1 part(s), ~1 tok (estimated)"))
+})
+
+test("reasoning dry-run provider tokens split by step and fallback is text-counted", async () => {
+    const { ctx, sent } = makeReasoningCtx(
+        ["--older-than", "2", "--dry-run"],
+        [
+            { type: "reasoning", id: "r_old", text: "old" },
+            { type: "reasoning", id: "r_old_2", text: "also old" },
+            { type: "step-finish", tokens: { reasoning: 61 } },
+            { type: "step-start" },
+            { type: "reasoning", id: "r_fallback", text: "12345678" },
+            { type: "text", id: "fallback-text", text: "answer" },
+        ],
+    )
+    await handlePruneCommand(ctx)
+    assert.ok(
+        sent
+            .join("\n")
+            .includes(
+                "Reasoning potential: 3 part(s), ~62 tok (2 provider-reported + 1 estimated)",
+            ),
+    )
+    assert.equal(ctx.state.prune.reasoning.size, 0)
+})
+
+test("reasoning does not alter tool targeting when tools are selected with it", async () => {
+    const { ctx } = makeReasoningCtx(["--older-than", "2", "--tools", "bash", "--reasoning"])
+    addTool(ctx.state, "call_old", "bash", { turn: 1, tokenCount: 100 })
+    await handlePruneCommand(ctx)
+    assert.ok(ctx.state.prune.tools.has("call_old"))
+    assert.ok(ctx.state.prune.reasoning.has("r_old"))
+})
+
+test("--top-N commits the largest tool rows without a saved preview", async () => {
+    const { ctx } = makeCtx(["--older-than", "1", "--top-2"])
+    addTool(ctx.state, "a1", "bash", { turn: 1, tokenCount: 80 })
+    addTool(ctx.state, "b1", "grep", { turn: 1, tokenCount: 50 })
+    addTool(ctx.state, "c1", "read", { turn: 1, tokenCount: 120 })
+    await handlePruneCommand(ctx)
+    assert.deepEqual([...ctx.state.prune.tools.keys()].sort(), ["a1", "c1"])
+})
+
+test("--indexes still requires a saved preview", async () => {
+    const { ctx, sent } = makeCtx(["--older-than", "1", "--indexes", "1"])
+    addTool(ctx.state, "a1", "bash", { turn: 1, tokenCount: 80 })
+    await handlePruneCommand(ctx)
+    assert.equal(ctx.state.prune.tools.size, 0)
+    assert.ok(sent.join("\n").includes("No saved prune preview"))
+})
+
+test("prune all defaults to top-five and commits reasoning without prior preview", async () => {
+    const { ctx, sent } = makeReasoningCtx(["all"])
+    for (let i = 1; i <= 6; i++)
+        addTool(ctx.state, `c${i}`, `tool${i}`, { turn: 1, tokenCount: i * 10 })
+    await handlePruneCommand(ctx)
+    assert.equal(ctx.state.prune.tools.size, 5)
+    assert.ok(ctx.state.prune.tools.has("c6"))
+    assert.ok(!ctx.state.prune.tools.has("c1"))
+    assert.deepEqual([...ctx.state.prune.reasoning.keys()], ["r_old"])
+    assert.ok(sent.join("\n").includes("Pruned 5 tool(s)"))
+    assert.ok(sent.join("\n").includes("Pruned 1 reasoning part(s)"))
+})
+
+test("prune all honors age, top-N, and explicit tool-glob overrides on commit", async () => {
+    const { ctx } = makeReasoningCtx(["all", "--older-than", "2", "--top-1", "--tools", "bash"])
+    addTool(ctx.state, "bash-old", "bash", { turn: 1, tokenCount: 40 })
+    addTool(ctx.state, "grep-old", "grep", { turn: 1, tokenCount: 100 })
+    await handlePruneCommand(ctx)
+    assert.deepEqual([...ctx.state.prune.tools.keys()], ["bash-old"])
+    assert.ok(ctx.state.prune.reasoning.has("r_old"))
+    assert.equal(ctx.state.prune.batches[0].selector, "older-than 2, tools: bash, top: 1")
+})
+
+test("prune all honors selector overrides and dry-run remains non-mutating", async () => {
+    const { ctx } = makeReasoningCtx([
+        "all",
+        "--older-than",
+        "2",
+        "--top-2",
+        "--tools",
+        "bash",
+        "--dry-run",
+    ])
+    addTool(ctx.state, "b1", "bash", { turn: 1, tokenCount: 50 })
+    addTool(ctx.state, "g1", "grep", { turn: 1, tokenCount: 100 })
+    await handlePruneCommand(ctx)
+    assert.equal(ctx.state.prune.tools.size, 0)
+    assert.equal(ctx.state.prune.reasoning.size, 0)
+    assert.equal(ctx.state.prune.batches.length, 0)
+    assert.equal(ctx.state.prune.preview?.olderThan, 2)
+    assert.deepEqual(ctx.state.prune.preview?.toolGlobs, ["bash"])
+})
+
+test("prune all dry-run marks top-N rows in the preview", async () => {
+    const { ctx, sent } = makeReasoningCtx(["all", "--top-1", "--dry-run"])
+    addTool(ctx.state, "small", "bash", { turn: 1, tokenCount: 10 })
+    addTool(ctx.state, "large", "grep", { turn: 1, tokenCount: 90 })
+    await handlePruneCommand(ctx)
+    assert.ok(sent.join("\n").includes("grep                     ×  1   ~90 tok ←"))
+    assert.ok(!sent.join("\n").includes("bash                     ×  1   ~10 tok ←"))
+})
+
+test("prune all rejects indexes", async () => {
+    const { ctx, sent } = makeReasoningCtx(["all", "--indexes", "1"])
+    await handlePruneCommand(ctx)
+    assert.equal(ctx.state.prune.batches.length, 0)
+    assert.ok(sent.join("\n").includes("does not accept --indexes"))
+})
+
+function makeReasoningCtx(
+    args: string[],
+    reasoningParts: any[] = [
+        { type: "reasoning", id: "r_old", text: "old reasoning" },
+        { type: "step-finish", tokens: { reasoning: 31 } },
+    ],
+) {
+    const state = buildState(10)
+    const { sent } = { sent: [] as string[] }
+    const oldAssistant: WithParts = {
+        info: {
+            id: "msg_old",
+            sessionID: state.sessionId,
+            role: "assistant",
+            time: { created: 1 },
+        } as any,
+        parts: [
+            { type: "step-start" } as any,
+            ...reasoningParts,
+            { type: "text", id: "txt", text: "answer" } as any,
+        ],
+    }
+    const lastUser: WithParts = {
+        info: {
+            id: "msg_user",
+            sessionID: state.sessionId,
+            role: "user",
+            time: { created: 2 },
+            model: { providerID: "test", modelID: "test" },
+            agent: "test",
+        } as any,
+        parts: [{ type: "text", id: "user-text", text: "next" } as any],
+    }
+    const activeAssistant: WithParts = {
+        info: {
+            id: "msg_active",
+            sessionID: state.sessionId,
+            role: "assistant",
+            time: { created: 3 },
+        } as any,
+        parts: [{ type: "reasoning", id: "r_active", text: "active" } as any],
+    }
+    return {
+        sent,
+        ctx: {
+            client: fakeClient(sent),
+            state,
+            config: buildPruneConfig(),
+            logger: testLogger(),
+            sessionId: state.sessionId!,
+            messages: [oldAssistant, lastUser, activeAssistant],
+            args,
+            workingDirectory: "/tmp",
+        },
+    }
+}
+
 test("parsePruneArgs: --top-N parses the embedded number", () => {
     const parsed = parsePruneArgs(["--older-than", "10", "--top-5"])
     assert.equal(parsed.error, undefined)

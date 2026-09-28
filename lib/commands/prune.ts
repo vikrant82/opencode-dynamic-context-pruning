@@ -16,6 +16,9 @@ import { sendIgnoredMessage } from "../ui/notification"
 import { getCurrentParams, getTotalToolTokens } from "../token-utils"
 import { saveSessionState } from "../state/persistence"
 import { syncToolCache } from "../state/tool-cache"
+import { isMessageCompacted } from "../state/utils"
+import { getLastUserMessage } from "../messages/query"
+import { countTokens } from "../token-utils"
 
 export interface PruneCommandContext {
     client: any
@@ -134,6 +137,7 @@ export interface ParsedPruneArgs {
     toolGlobs?: string[]
     indexes?: number[]
     topN?: number
+    reasoning?: boolean
     dryRun: boolean
     error?: string
 }
@@ -143,6 +147,87 @@ export interface ToolGroup {
     count: number
     tokens: number
     ids: string[]
+}
+
+interface ReasoningCandidate {
+    id: string
+    tokenCount: number
+    providerReported: boolean
+}
+
+/** Resolve old reasoning blocks without touching active assistant/tool-loop context. */
+export function resolveReasoningCandidates(
+    state: SessionState,
+    messages: WithParts[],
+    olderThan: number,
+): ReasoningCandidate[] {
+    let lastUserIndex = -1
+    for (let i = 0; i < messages.length; i++) {
+        if (messages[i].info.role === "user") lastUserIndex = i
+    }
+    if (lastUserIndex < 0) lastUserIndex = messages.length
+
+    let turnCounter = 0
+    const candidates: ReasoningCandidate[] = []
+    let prefixBlocked = false
+    for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
+        const msg = messages[messageIndex]
+        if (isMessageCompacted(state, msg)) continue
+        const parts = Array.isArray(msg.parts) ? msg.parts : []
+        const partTurns = new Map<number, number>()
+        const stepReasoning: number[] = []
+        const finishTokens = new Map<number, number>()
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i] as any
+            if (part.type === "step-start") {
+                turnCounter++
+                stepReasoning.length = 0
+            } else if (part.type === "reasoning") {
+                partTurns.set(i, turnCounter)
+                stepReasoning.push(i)
+            } else if (part.type === "step-finish") {
+                const tokens = Number(part.tokens?.reasoning ?? 0)
+                if (tokens > 0 && stepReasoning.length > 0) {
+                    stepReasoning.forEach((partIndex, index) => {
+                        finishTokens.set(
+                            partIndex,
+                            Math.floor(tokens / stepReasoning.length) +
+                                (index < tokens % stepReasoning.length ? 1 : 0),
+                        )
+                    })
+                }
+                stepReasoning.length = 0
+            }
+        }
+        if (msg.info.role !== "assistant" || messageIndex >= lastUserIndex || prefixBlocked)
+            continue
+        // An open step has no step-finish token count; it uses text fallback below.
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i] as any
+            if (part.type !== "reasoning" || typeof part.id !== "string") continue
+            if (state.prune.reasoning.has(part.id)) continue
+            if (state.currentTurn - (partTurns.get(i) ?? 0) < olderThan) {
+                prefixBlocked = true
+                break
+            }
+            candidates.push({
+                id: part.id,
+                tokenCount: finishTokens.has(i)
+                    ? finishTokens.get(i)!
+                    : countTokens(part.text ?? ""),
+                providerReported: finishTokens.has(i),
+            })
+        }
+    }
+    return candidates
+}
+
+function reasoningSourceLabel(candidates: ReasoningCandidate[]): string {
+    const reported = candidates.filter((candidate) => candidate.providerReported).length
+    const estimated = candidates.length - reported
+    if (reported === 0) return "estimated"
+    if (estimated === 0) return "provider-reported"
+    return `${reported} provider-reported + ${estimated} estimated`
 }
 
 function isValidPrunePreview(
@@ -250,6 +335,8 @@ export function parsePruneArgs(args: string[]): ParsedPruneArgs {
             parsed.topN = topN
         } else if (arg === "--dry-run") {
             parsed.dryRun = true
+        } else if (arg === "--reasoning") {
+            parsed.reasoning = true
         } else {
             return { dryRun: false, error: `Unknown option: ${arg}` }
         }
@@ -264,16 +351,19 @@ export function parsePruneArgs(args: string[]): ParsedPruneArgs {
 }
 
 const PRUNE_USAGE = [
-    "Usage: /dcp prune --older-than <steps> [--tools <globs>] [--indexes <list> | --top-N] [--dry-run]",
+    "Usage: /dcp prune --older-than <steps> [--tools <globs>] [--reasoning] [--indexes <list> | --top-N] [--dry-run]",
     "",
     "  --older-than <steps>  Prune completed/errored tool outputs aged ≥ <steps> LLM steps",
     "  --tools <globs>       Comma-separated tool-name globs; explicit selection overrides protection",
     "  --indexes <list>      Select rows from the last matching dry-run preview (e.g. 1,3-5)",
     "  --top-N               Select the preview's top N rows (e.g. --top-5)",
+    "  --reasoning           Also remove all eligible old reasoning parts (oldest-first)",
     "  --dry-run             List candidates + estimated savings without pruning",
     "",
     "  Preview first with --dry-run and the same --older-than; --tools may be omitted on apply.",
     "  --indexes and --top-N are mutually exclusive; both compose with --tools.",
+    "  Reasoning stays eligible only before the latest user message; unprune cannot restore it.",
+    "  Reasoning estimates use positive step-finish provider tokens split across that step's parts; zero/missing counts use text estimates.",
     "",
     "Example: /dcp prune --older-than 150 --tools serena_*,codebase-memory-* --dry-run",
     "Example: /dcp prune --older-than 1 --top-5",
@@ -330,6 +420,8 @@ function formatDryRunMessage(
     totalTokens: number,
     groups: ToolGroup[],
     selectedIndexes: Set<number> | null,
+    reasoningCandidates: ReasoningCandidate[],
+    reasoningTokens: number,
 ): string {
     const lines = boxLines("                 DCP Prune (dry-run)")
     lines.push(
@@ -347,16 +439,35 @@ function formatDryRunMessage(
         lines.push(`  Skipped: ${parts.join(", ")}`)
     }
     lines.push(`  Estimated savings: ~${totalTokens.toLocaleString()} tokens`)
+    lines.push(
+        reasoningCandidates.length === 0
+            ? `  Reasoning: no eligible parts older than ${parsed.olderThan} steps${parsed.reasoning ? " — selected" : " — add --reasoning to select"}`
+            : `  Reasoning potential: ${reasoningCandidates.length} part(s), ~${reasoningTokens.toLocaleString()} tok (${reasoningSourceLabel(reasoningCandidates)})${parsed.reasoning ? " — selected" : " — not selected; add --reasoning"}`,
+    )
+    lines.push("  Reasoning only saves context on models that keep prior-turn reasoning.")
     lines.push("")
     lines.push("Run without --dry-run to apply · /dcp unprune reverts the batch")
     return lines.join("\n")
 }
 
-function formatCommitMessage(count: number, batchId: number, totalTokens: number): string {
+function formatCommitMessage(
+    count: number,
+    batchId: number,
+    totalTokens: number,
+    reasoningCount: number,
+    reasoningTokens: number,
+    reasoningCandidates: ReasoningCandidate[],
+): string {
     const lines = boxLines("                      DCP Prune")
     lines.push(
         `Pruned ${count} tool(s) — batch #${batchId}, ~${totalTokens.toLocaleString()} tokens, effective on next request`,
     )
+    if (reasoningCount > 0) {
+        lines.push(
+            `Pruned ${reasoningCount} reasoning part(s), ~${reasoningTokens.toLocaleString()} tokens (${reasoningSourceLabel(reasoningCandidates)})`,
+        )
+        lines.push("Reasoning pruning is one-way; /dcp unprune cannot restore it.")
+    }
     lines.push("/dcp unprune = revert this batch · /dcp unprune --all = revert all manual prunes")
     return lines.join("\n")
 }
@@ -388,6 +499,30 @@ function formatNoCandidatesMessage(
 export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void> {
     const { client, state, config, logger, sessionId, messages, args } = ctx
     const params = getCurrentParams(state, messages, logger)
+    if (args[0]?.toLowerCase() === "all") {
+        const options = args.slice(1)
+        if (options.includes("--indexes")) {
+            await sendIgnoredMessage(
+                client,
+                sessionId,
+                "/dcp prune all does not accept --indexes; use --top-N",
+                params,
+                logger,
+            )
+            return
+        }
+        const allArgs = [
+            ...(options.includes("--older-than") ? [] : ["--older-than", "1"]),
+            ...(options.some((arg) => arg.startsWith("--top-")) ? [] : ["--top-5"]),
+            "--reasoning",
+            ...options,
+        ]
+        const allDryRun = allArgs.includes("--dry-run")
+        const runArgs = allArgs.filter((arg) => arg !== "--dry-run")
+        await handlePruneCommand({ ...ctx, args: allDryRun ? allArgs : [...runArgs, "--dry-run"] })
+        if (!allDryRun) await handlePruneCommand({ ...ctx, args: runArgs })
+        return
+    }
     const parsed = parsePruneArgs(args)
     if (parsed.error) {
         await sendIgnoredMessage(
@@ -404,9 +539,13 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         olderThan: parsed.olderThan!,
         toolGlobs: parsed.toolGlobs,
     })
-    const groups = buildOrderedGroups(resolution.candidates)
     const hasIndexSelection = parsed.indexes !== undefined || parsed.topN !== undefined
-    let effectiveCandidates = resolution.candidates
+    const targetTools = !!parsed.toolGlobs || hasIndexSelection || !parsed.reasoning
+    const toolCandidates = targetTools ? resolution.candidates : []
+    const reasoningCandidates = resolveReasoningCandidates(state, messages, parsed.olderThan!)
+    const reasoningTokens = reasoningCandidates.reduce((sum, item) => sum + item.tokenCount, 0)
+    const groups = buildOrderedGroups(toolCandidates)
+    let effectiveCandidates = toolCandidates
     let selectedIndexSet: Set<number> | null = null
 
     if (parsed.dryRun) {
@@ -423,9 +562,9 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
             }
             selectedIndexSet = new Set(indexes)
             const selectedIds = new Set(selectGroupsByIndex(groups, indexes).flatMap((g) => g.ids))
-            effectiveCandidates = resolution.candidates.filter((c) => selectedIds.has(c.id))
+            effectiveCandidates = toolCandidates.filter((c) => selectedIds.has(c.id))
         }
-        if (resolution.candidates.length === 0) {
+        if (toolCandidates.length === 0 && reasoningCandidates.length === 0) {
             state.prune.preview = {
                 olderThan: parsed.olderThan!,
                 toolGlobs: parsed.toolGlobs,
@@ -436,7 +575,7 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
             } catch (err: any) {
                 logger.error("Failed to persist prune preview", { error: err?.message })
             }
-            const message = formatNoCandidatesMessage(state, resolution, parsed)
+            const message = `${formatNoCandidatesMessage(state, { ...resolution, candidates: toolCandidates }, parsed)}\n  Reasoning: no eligible parts older than ${parsed.olderThan} steps${parsed.reasoning ? " — selected" : " — add --reasoning to select"}\n  Reasoning only saves context on models that keep prior-turn reasoning.`
             await sendIgnoredMessage(client, sessionId, message, params, logger)
             logger.info("Prune command: no candidates", { skips: resolution.skips })
             return
@@ -444,11 +583,13 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         const candidateIds = effectiveCandidates.map((c) => c.id)
         const totalTokens = getTotalToolTokens(state, candidateIds)
         const message = formatDryRunMessage(
-            resolution,
+            { ...resolution, candidates: toolCandidates },
             parsed,
             totalTokens,
             groups,
             selectedIndexSet,
+            reasoningCandidates,
+            reasoningTokens,
         )
         await sendIgnoredMessage(client, sessionId, message, params, logger)
         state.prune.preview = {
@@ -474,11 +615,11 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         if (parsed.toolGlobs === undefined && preview?.toolGlobs !== undefined) {
             effectiveToolGlobs = preview.toolGlobs
         }
-        if (!preview) {
+        if (!preview && parsed.indexes !== undefined) {
             await sendIgnoredMessage(
                 client,
                 sessionId,
-                "No saved prune preview for this session. Run --dry-run again before --top-N or --indexes.",
+                "No saved prune preview for this session. Run --dry-run again before --indexes.",
                 params,
                 logger,
             )
@@ -486,10 +627,12 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         }
         const sameGlobs =
             parsed.toolGlobs === undefined ||
-            (preview.toolGlobs !== undefined &&
+            (!!preview &&
+                preview.toolGlobs !== undefined &&
                 preview.toolGlobs.length === parsed.toolGlobs.length &&
                 preview.toolGlobs.every((glob, index) => glob === parsed.toolGlobs![index]))
-        if (preview.olderThan !== parsed.olderThan || !sameGlobs) {
+        const matchingPreview = !!preview && preview.olderThan === parsed.olderThan && sameGlobs
+        if (parsed.indexes !== undefined && !matchingPreview) {
             await sendIgnoredMessage(
                 client,
                 sessionId,
@@ -499,41 +642,44 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
             )
             return
         }
+        const freshTopGroups = parsed.topN !== undefined && !matchingPreview ? groups : null
+        const selectedGroups = matchingPreview
+            ? preview.groups.map((group) => ({
+                  tool: group.tool,
+                  count: group.ids.length,
+                  tokens: 0,
+                  ids: group.ids,
+              }))
+            : (freshTopGroups ?? [])
         const indexes =
             parsed.topN !== undefined
                 ? Array.from(
-                      { length: Math.min(parsed.topN, preview.groups.length) },
+                      { length: Math.min(parsed.topN, selectedGroups.length) },
                       (_, i) => i + 1,
                   )
                 : parsed.indexes!
-        const outOfRange = indexes.filter((i) => i > preview.groups.length)
+        const outOfRange = indexes.filter((i) => i > selectedGroups.length)
         if (outOfRange.length > 0) {
             await sendIgnoredMessage(
                 client,
                 sessionId,
-                `Index ${outOfRange.join(", ")} out of range (preview has ${preview.groups.length} group(s))`,
+                `Index ${outOfRange.join(", ")} out of range (${matchingPreview ? "preview" : "current selection"} has ${selectedGroups.length} group(s))`,
                 params,
                 logger,
             )
             return
         }
         selectedIndexSet = new Set(indexes)
-        selectedSnapshotIds = selectGroupsByIndex(
-            preview.groups.map((group) => ({
-                tool: group.tool,
-                count: group.ids.length,
-                tokens: 0,
-                ids: group.ids,
-            })),
-            indexes,
-        ).flatMap((group) => group.ids)
+        selectedSnapshotIds = selectGroupsByIndex(selectedGroups, indexes).flatMap(
+            (group) => group.ids,
+        )
         // If the user omitted --tools but the preview had globs, re-resolve with the
         // preview's globs so the eligibility check includes the same tools.
         const eligibilityResolution =
-            parsed.toolGlobs === undefined && preview.toolGlobs !== undefined
+            matchingPreview && parsed.toolGlobs === undefined && preview!.toolGlobs !== undefined
                 ? resolvePruneCandidates(state, config, messages, {
                       olderThan: parsed.olderThan!,
-                      toolGlobs: preview.toolGlobs,
+                      toolGlobs: preview!.toolGlobs,
                   })
                 : resolution
         const currentlyEligible = new Map(
@@ -554,14 +700,24 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         effectiveCandidates = eligibilityResolution.candidates.filter((candidate) =>
             selectedIds.has(candidate.id),
         )
-    } else if (resolution.candidates.length === 0) {
-        const message = formatNoCandidatesMessage(state, resolution, parsed)
+    } else if (
+        toolCandidates.length === 0 &&
+        (!parsed.reasoning || reasoningCandidates.length === 0)
+    ) {
+        const message = formatNoCandidatesMessage(
+            state,
+            { ...resolution, candidates: toolCandidates },
+            parsed,
+        )
         await sendIgnoredMessage(client, sessionId, message, params, logger)
         logger.info("Prune command: no candidates", { skips: resolution.skips })
         return
     }
 
-    if (effectiveCandidates.length === 0) {
+    if (
+        effectiveCandidates.length === 0 &&
+        (!parsed.reasoning || reasoningCandidates.length === 0)
+    ) {
         await sendIgnoredMessage(client, sessionId, "Selection matched no tools.", params, logger)
         return
     }
@@ -572,6 +728,11 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         state.prune.notifiedToolIds.add(id)
         if (effectiveToolGlobs) {
             state.prune.explicitTools.add(id)
+        }
+    }
+    if (parsed.reasoning) {
+        for (const candidate of reasoningCandidates) {
+            state.prune.reasoning.set(candidate.id, candidate.tokenCount)
         }
     }
     const batchId = (state.prune.batches[state.prune.batches.length - 1]?.id ?? 0) + 1
@@ -599,7 +760,14 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
     } catch (err: any) {
         logger.error("Failed to persist state after prune", { error: err?.message })
     }
-    const message = formatCommitMessage(effectiveCandidates.length, batchId, totalTokens)
+    const message = formatCommitMessage(
+        effectiveCandidates.length,
+        batchId,
+        totalTokens,
+        parsed.reasoning ? reasoningCandidates.length : 0,
+        parsed.reasoning ? reasoningTokens : 0,
+        parsed.reasoning ? reasoningCandidates : [],
+    )
     await sendIgnoredMessage(client, sessionId, message, params, logger)
     logger.info("Prune command completed", {
         tools: candidateIds.length,
