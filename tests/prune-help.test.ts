@@ -6,6 +6,7 @@ import { formatHelpMessage } from "../lib/commands/help"
 test("help lists prune and unprune commands", () => {
     const message = formatHelpMessage(buildState(10), buildPruneConfig())
     assert.ok(message.includes("/dcp prune --older-than"))
-    assert.ok(message.includes("all defaults to top-5 + reasoning"))
+    assert.ok(message.includes("all ignores protections (top-5 + reasoning)"))
+    assert.ok(message.includes("use --top-5 to respect them"))
     assert.ok(message.includes("/dcp unprune [--all]"))
 })

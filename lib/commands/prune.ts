@@ -17,7 +17,7 @@ import { getCurrentParams, getTotalToolTokens } from "../token-utils"
 import { saveSessionState } from "../state/persistence"
 import { syncToolCache } from "../state/tool-cache"
 import { isMessageCompacted } from "../state/utils"
-import { getLastUserMessage } from "../messages/query"
+import { getLastRealUserMessageIndex } from "../messages/query"
 import { countTokens } from "../token-utils"
 
 export interface PruneCommandContext {
@@ -29,6 +29,10 @@ export interface PruneCommandContext {
     messages: WithParts[]
     args: string[]
     workingDirectory: string
+    /** Internal selection preview used by the `all` alias. */
+    pruneAllSelection?: boolean
+    /** The all alias must never persist its internal selection preview. */
+    suppressPrunePreview?: boolean
 }
 
 export interface UnpruneCommandContext {
@@ -108,6 +112,11 @@ export function resolvePruneCandidates(
             }
             globMatched++
         } else {
+            // Existing prunes take precedence in skip reporting over protection categories.
+            if (state.prune.tools.has(id)) {
+                skips.alreadyPruned++
+                continue
+            }
             if (BUILTIN_SKIP_TOOLS.has(entry.tool)) {
                 skips.builtinSkip++
                 continue
@@ -121,7 +130,7 @@ export function resolvePruneCandidates(
             skips.compressed++
             continue
         }
-        if (state.prune.tools.has(id)) {
+        if (explicit && state.prune.tools.has(id)) {
             skips.alreadyPruned++
             continue
         }
@@ -161,11 +170,8 @@ export function resolveReasoningCandidates(
     messages: WithParts[],
     olderThan: number,
 ): ReasoningCandidate[] {
-    let lastUserIndex = -1
-    for (let i = 0; i < messages.length; i++) {
-        if (messages[i].info.role === "user") lastUserIndex = i
-    }
-    if (lastUserIndex < 0) lastUserIndex = messages.length
+    const lastUserIndex = getLastRealUserMessageIndex(messages)
+    if (lastUserIndex < 0) return []
 
     let turnCounter = 0
     const candidates: ReasoningCandidate[] = []
@@ -362,6 +368,7 @@ const PRUNE_USAGE = [
     "",
     "  Preview first with --dry-run and the same --older-than; --tools may be omitted on apply.",
     "  --indexes and --top-N are mutually exclusive; both compose with --tools.",
+    "  /dcp prune all ignores tool protections; use /dcp prune --older-than N --top-5 to respect them.",
     "  Reasoning stays eligible only before the latest user message; unprune cannot restore it.",
     "  Reasoning estimates use positive step-finish provider tokens split across that step's parts; zero/missing counts use text estimates.",
     "",
@@ -422,23 +429,33 @@ function formatDryRunMessage(
     selectedIndexes: Set<number> | null,
     reasoningCandidates: ReasoningCandidate[],
     reasoningTokens: number,
+    targetTools: boolean,
+    allSelection: boolean,
 ): string {
-    const lines = boxLines("                 DCP Prune (dry-run)")
-    lines.push(
-        `Eligible: ${resolution.candidates.length} tool(s) older than ${parsed.olderThan} steps`,
+    const lines = boxLines(
+        allSelection
+            ? "             DCP Prune (all) — selection"
+            : "                 DCP Prune (dry-run)",
     )
-    groups.forEach((group, i) => {
-        const idx = i + 1
-        const marker = selectedIndexes?.has(idx) ? " ←" : ""
+    if (!targetTools) {
+        lines.push("Tools: not selected (add --tools, --top-N, or use /dcp prune all)")
+    } else {
         lines.push(
-            `  ${String(idx).padStart(2)}  ${group.tool.padEnd(24)} ×${String(group.count).padStart(3)}   ~${group.tokens.toLocaleString()} tok${marker}`,
+            `Eligible: ${resolution.candidates.length} tool(s) older than ${parsed.olderThan} steps`,
         )
-    })
-    const parts = skipSummary(resolution.skips, !!parsed.toolGlobs)
-    if (parts.length > 0) {
-        lines.push(`  Skipped: ${parts.join(", ")}`)
+        groups.forEach((group, i) => {
+            const idx = i + 1
+            const marker = selectedIndexes?.has(idx) ? " ←" : ""
+            lines.push(
+                `  ${String(idx).padStart(2)}  ${group.tool.padEnd(24)} ×${String(group.count).padStart(3)}   ~${group.tokens.toLocaleString()} tok${marker}`,
+            )
+        })
+        const parts = skipSummary(resolution.skips, !!parsed.toolGlobs)
+        if (parts.length > 0) {
+            lines.push(`  Skipped: ${parts.join(", ")}`)
+        }
+        lines.push(`  Estimated savings: ~${totalTokens.toLocaleString()} tokens`)
     }
-    lines.push(`  Estimated savings: ~${totalTokens.toLocaleString()} tokens`)
     lines.push(
         reasoningCandidates.length === 0
             ? `  Reasoning: no eligible parts older than ${parsed.olderThan} steps${parsed.reasoning ? " — selected" : " — add --reasoning to select"}`
@@ -446,29 +463,41 @@ function formatDryRunMessage(
     )
     lines.push("  Reasoning only saves context on models that keep prior-turn reasoning.")
     lines.push("")
-    lines.push("Run without --dry-run to apply · /dcp unprune reverts the batch")
+    if (!allSelection) {
+        lines.push(
+            targetTools
+                ? "Run without --dry-run to apply · /dcp unprune reverts the batch"
+                : "Run without --dry-run to apply · reasoning pruning is one-way",
+        )
+    }
     return lines.join("\n")
 }
 
 function formatCommitMessage(
     count: number,
-    batchId: number,
+    batchId: number | undefined,
     totalTokens: number,
     reasoningCount: number,
     reasoningTokens: number,
     reasoningCandidates: ReasoningCandidate[],
 ): string {
     const lines = boxLines("                      DCP Prune")
-    lines.push(
-        `Pruned ${count} tool(s) — batch #${batchId}, ~${totalTokens.toLocaleString()} tokens, effective on next request`,
-    )
+    if (batchId !== undefined) {
+        lines.push(
+            `Pruned ${count} tool(s) — batch #${batchId}, ~${totalTokens.toLocaleString()} tokens, effective on next request`,
+        )
+    }
     if (reasoningCount > 0) {
         lines.push(
             `Pruned ${reasoningCount} reasoning part(s), ~${reasoningTokens.toLocaleString()} tokens (${reasoningSourceLabel(reasoningCandidates)})`,
         )
         lines.push("Reasoning pruning is one-way; /dcp unprune cannot restore it.")
     }
-    lines.push("/dcp unprune = revert this batch · /dcp unprune --all = revert all manual prunes")
+    if (batchId !== undefined) {
+        lines.push(
+            "/dcp unprune = revert this batch · /dcp unprune --all = revert all manual prunes",
+        )
+    }
     return lines.join("\n")
 }
 
@@ -514,12 +543,18 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         const allArgs = [
             ...(options.includes("--older-than") ? [] : ["--older-than", "1"]),
             ...(options.some((arg) => arg.startsWith("--top-")) ? [] : ["--top-5"]),
+            ...(options.includes("--tools") ? [] : ["--tools", "*"]),
             "--reasoning",
             ...options,
         ]
         const allDryRun = allArgs.includes("--dry-run")
         const runArgs = allArgs.filter((arg) => arg !== "--dry-run")
-        await handlePruneCommand({ ...ctx, args: allDryRun ? allArgs : [...runArgs, "--dry-run"] })
+        await handlePruneCommand({
+            ...ctx,
+            pruneAllSelection: !allDryRun,
+            suppressPrunePreview: true,
+            args: allDryRun ? allArgs : [...runArgs, "--dry-run"],
+        })
         if (!allDryRun) await handlePruneCommand({ ...ctx, args: runArgs })
         return
     }
@@ -565,17 +600,34 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
             effectiveCandidates = toolCandidates.filter((c) => selectedIds.has(c.id))
         }
         if (toolCandidates.length === 0 && reasoningCandidates.length === 0) {
-            state.prune.preview = {
-                olderThan: parsed.olderThan!,
-                toolGlobs: parsed.toolGlobs,
-                groups: [],
+            if (!targetTools) {
+                const message = formatDryRunMessage(
+                    { ...resolution, candidates: [] },
+                    parsed,
+                    0,
+                    [],
+                    selectedIndexSet,
+                    reasoningCandidates,
+                    reasoningTokens,
+                    false,
+                    !!ctx.pruneAllSelection,
+                )
+                await sendIgnoredMessage(client, sessionId, message, params, logger)
+                return
             }
-            try {
-                await saveSessionState(state, logger)
-            } catch (err: any) {
-                logger.error("Failed to persist prune preview", { error: err?.message })
+            if (!ctx.suppressPrunePreview) {
+                state.prune.preview = {
+                    olderThan: parsed.olderThan!,
+                    toolGlobs: parsed.toolGlobs,
+                    groups: [],
+                }
+                try {
+                    await saveSessionState(state, logger)
+                } catch (err: any) {
+                    logger.error("Failed to persist prune preview", { error: err?.message })
+                }
             }
-            const message = `${formatNoCandidatesMessage(state, { ...resolution, candidates: toolCandidates }, parsed)}\n  Reasoning: no eligible parts older than ${parsed.olderThan} steps${parsed.reasoning ? " — selected" : " — add --reasoning to select"}\n  Reasoning only saves context on models that keep prior-turn reasoning.`
+            const message = `Nothing to prune: no eligible tools or reasoning parts.\n${formatNoCandidatesMessage(state, { ...resolution, candidates: toolCandidates }, parsed)}\n  Reasoning: no eligible parts older than ${parsed.olderThan} steps${parsed.reasoning ? " — selected" : " — add --reasoning to select"}\n  Reasoning only saves context on models that keep prior-turn reasoning.`
             await sendIgnoredMessage(client, sessionId, message, params, logger)
             logger.info("Prune command: no candidates", { skips: resolution.skips })
             return
@@ -590,17 +642,21 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
             selectedIndexSet,
             reasoningCandidates,
             reasoningTokens,
+            targetTools,
+            !!ctx.pruneAllSelection,
         )
         await sendIgnoredMessage(client, sessionId, message, params, logger)
-        state.prune.preview = {
-            olderThan: parsed.olderThan!,
-            toolGlobs: parsed.toolGlobs ? [...parsed.toolGlobs] : undefined,
-            groups: groups.map(({ tool, ids }) => ({ tool, ids: [...ids] })),
-        }
-        try {
-            await saveSessionState(state, logger)
-        } catch (err: any) {
-            logger.error("Failed to persist prune preview", { error: err?.message })
+        if (!ctx.pruneAllSelection) {
+            state.prune.preview = {
+                olderThan: parsed.olderThan!,
+                toolGlobs: parsed.toolGlobs ? [...parsed.toolGlobs] : undefined,
+                groups: groups.map(({ tool, ids }) => ({ tool, ids: [...ids] })),
+            }
+            try {
+                await saveSessionState(state, logger)
+            } catch (err: any) {
+                logger.error("Failed to persist prune preview", { error: err?.message })
+            }
         }
         logger.info("Prune command: dry-run", { candidates: candidateIds.length, totalTokens })
         return
@@ -704,11 +760,11 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         toolCandidates.length === 0 &&
         (!parsed.reasoning || reasoningCandidates.length === 0)
     ) {
-        const message = formatNoCandidatesMessage(
+        const message = `Nothing to prune: no eligible tools or reasoning parts.\n${formatNoCandidatesMessage(
             state,
             { ...resolution, candidates: toolCandidates },
             parsed,
-        )
+        )}`
         await sendIgnoredMessage(client, sessionId, message, params, logger)
         logger.info("Prune command: no candidates", { skips: resolution.skips })
         return
@@ -718,9 +774,16 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
         effectiveCandidates.length === 0 &&
         (!parsed.reasoning || reasoningCandidates.length === 0)
     ) {
-        await sendIgnoredMessage(client, sessionId, "Selection matched no tools.", params, logger)
+        await sendIgnoredMessage(
+            client,
+            sessionId,
+            "Nothing to prune: no eligible tools or reasoning parts.",
+            params,
+            logger,
+        )
         return
     }
+
     const candidateIds = effectiveCandidates.map((c) => c.id)
     const totalTokens = getTotalToolTokens(state, candidateIds)
     for (const { id, entry } of effectiveCandidates) {
@@ -735,21 +798,26 @@ export async function handlePruneCommand(ctx: PruneCommandContext): Promise<void
             state.prune.reasoning.set(candidate.id, candidate.tokenCount)
         }
     }
-    const batchId = (state.prune.batches[state.prune.batches.length - 1]?.id ?? 0) + 1
+    const batchId =
+        candidateIds.length > 0
+            ? (state.prune.batches[state.prune.batches.length - 1]?.id ?? 0) + 1
+            : undefined
     const selectorParts = [`older-than ${parsed.olderThan}`]
     if (effectiveToolGlobs) selectorParts.push(`tools: ${effectiveToolGlobs.join(",")}`)
     if (parsed.indexes) selectorParts.push(`indexes: ${parsed.indexes.join(",")}`)
     if (parsed.topN !== undefined) selectorParts.push(`top: ${parsed.topN}`)
     const selector = selectorParts.join(", ")
-    state.prune.batches.push({
-        id: batchId,
-        at: new Date().toISOString(),
-        selector,
-        toolIds: candidateIds,
-        estTokens: totalTokens,
-    })
-    if (state.prune.batches.length > MAX_PRUNE_BATCHES) {
-        state.prune.batches.shift()
+    if (batchId !== undefined) {
+        state.prune.batches.push({
+            id: batchId,
+            at: new Date().toISOString(),
+            selector,
+            toolIds: candidateIds,
+            estTokens: totalTokens,
+        })
+        if (state.prune.batches.length > MAX_PRUNE_BATCHES) {
+            state.prune.batches.shift()
+        }
     }
     state.prune.preview = null
     state.stats.pruneTokenCounter += totalTokens
