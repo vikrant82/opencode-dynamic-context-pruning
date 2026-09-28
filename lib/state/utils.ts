@@ -331,6 +331,7 @@ export function getActiveSummaryTokenUsage(state: SessionState): number {
 export function resetOnCompaction(state: SessionState): void {
     state.toolParameters.clear()
     state.prune.tools = new Map<string, number>()
+    state.prune.reasoning = new Map<string, number>()
     state.prune.messages = createPruneMessagesState()
     state.prune.explicitTools = new Set<string>()
     state.prune.notifiedToolIds = new Set<string>()

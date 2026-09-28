@@ -30,8 +30,8 @@ const TOOL_COMMANDS: Record<string, [string, string]> = {
     decompress: ["/dcp decompress <n>", "Restore selected compression"],
     recompress: ["/dcp recompress <n>", "Re-apply a user-decompressed compression"],
     prune: [
-        "/dcp prune --older-than <n> [--tools …] [--dry-run]",
-        "Prune old tool outputs on demand",
+        "/dcp prune --older-than <n> [--top-N] [--tools …] [--reasoning] [--dry-run]",
+        "Prune old tools; top-N works without preview; all defaults to top-5 + reasoning",
     ],
     unprune: ["/dcp unprune [--all]", "Revert manual prune batches"],
 }

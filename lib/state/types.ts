@@ -89,6 +89,7 @@ export interface PrunePreview {
 
 export interface Prune {
     tools: Map<string, number>
+    reasoning: Map<string, number>
     messages: PruneMessagesState
     explicitTools: Set<string>
     notifiedToolIds: Set<string>

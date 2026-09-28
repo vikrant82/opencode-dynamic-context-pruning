@@ -73,6 +73,7 @@ export function createSessionState(): SessionState {
         pendingManualTrigger: null,
         prune: {
             tools: new Map<string, number>(),
+            reasoning: new Map<string, number>(),
             messages: createPruneMessagesState(),
             explicitTools: new Set<string>(),
             notifiedToolIds: new Set<string>(),
@@ -115,6 +116,7 @@ export function resetSessionState(state: SessionState): void {
     state.pendingManualTrigger = null
     state.prune = {
         tools: new Map<string, number>(),
+        reasoning: new Map<string, number>(),
         messages: createPruneMessagesState(),
         explicitTools: new Set<string>(),
         notifiedToolIds: new Set<string>(),
@@ -181,6 +183,7 @@ export async function ensureSessionInitialized(
     }
 
     state.prune.tools = loadPruneMap(persisted.prune.tools)
+    state.prune.reasoning = loadPruneMap(persisted.prune.reasoning)
     state.prune.explicitTools = new Set(persisted.prune.explicitTools ?? [])
     state.prune.notifiedToolIds = new Set(persisted.prune.notifiedToolIds ?? [])
     state.prune.batches = Array.isArray(persisted.prune.batches) ? persisted.prune.batches : []
