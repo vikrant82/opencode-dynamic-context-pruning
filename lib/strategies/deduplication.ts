@@ -50,6 +50,7 @@ export const deduplicate = (
             // logger.warn(`Missing metadata for tool call ID: ${id}`)
             continue
         }
+        if (metadata.tool === "dcp_prune") continue
 
         // Skip protected tools
         if (isToolNameProtected(metadata.tool, protectedTools)) {

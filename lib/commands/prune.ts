@@ -96,6 +96,7 @@ export function resolvePruneCandidates(
     let globMatched = 0
     let youngestEligibleAge: number | null = null
     for (const [id, entry] of state.toolParameters) {
+        if (entry.tool === "dcp_prune") continue
         const age = state.currentTurn - entry.turn
         if (age < options.olderThan) {
             continue

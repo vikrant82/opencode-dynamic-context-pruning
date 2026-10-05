@@ -2,7 +2,7 @@ export type PermissionAction = "ask" | "allow" | "deny"
 
 export type PermissionValue = PermissionAction | Record<string, PermissionAction>
 
-export type PermissionConfig = Record<string, PermissionValue> | undefined
+export type PermissionConfig = Record<string, PermissionValue> | PermissionAction | undefined
 
 export interface HostPermissionSnapshot {
     global: PermissionConfig
@@ -49,6 +49,10 @@ const getPermissionRules = (permissionConfigs: PermissionConfig[]): PermissionRu
     const rules: PermissionRule[] = []
     for (const permissionConfig of permissionConfigs) {
         if (!permissionConfig) {
+            continue
+        }
+        if (typeof permissionConfig === "string") {
+            rules.push({ permission: "*", pattern: "*", action: permissionConfig })
             continue
         }
 
@@ -98,4 +102,21 @@ export const hasExplicitToolPermission = (
     tool: string,
 ): boolean => {
     return permissionConfig ? Object.prototype.hasOwnProperty.call(permissionConfig, tool) : false
+}
+
+/** Resolve the last matching host rule for a frozen batch; no permission is mutated. */
+export function resolvePruneHostPermission(
+    snapshot: HostPermissionSnapshot,
+    agent?: string,
+    pattern = "*",
+    sessionRules: PermissionRule[] = [],
+): PermissionAction | undefined {
+    return findLastMatchingRule(
+        [
+            ...getPermissionRules([snapshot.global, agent ? snapshot.agents[agent] : undefined]),
+            ...sessionRules,
+        ],
+        (rule) =>
+            wildcardMatch("dcp_prune", rule.permission) && wildcardMatch(pattern, rule.pattern),
+    )?.action
 }

@@ -329,6 +329,7 @@ export function getActiveSummaryTokenUsage(state: SessionState): number {
 }
 
 export function resetOnCompaction(state: SessionState): void {
+    state.pruneEpisode = undefined
     state.toolParameters.clear()
     state.prune.tools = new Map<string, number>()
     state.prune.reasoning = new Map<string, number>()

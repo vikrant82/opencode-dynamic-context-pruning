@@ -115,6 +115,14 @@ export interface Nudges {
 }
 
 export interface SessionState {
+    pruneEpisode?: {
+        baseline?: number
+        notifiedReportKey?: string
+        awaitingReportAfter?: string
+        appliedHistoryIds?: string[]
+        pending?: string
+        compaction: number
+    }
     sessionId: string | null
     isSubAgent: boolean
     manualMode: false | "active" | "compress-pending"

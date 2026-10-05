@@ -109,6 +109,7 @@ export function createSessionState(): SessionState {
 }
 
 export function resetSessionState(state: SessionState): void {
+    state.pruneEpisode = undefined
     state.sessionId = null
     state.isSubAgent = false
     state.manualMode = false
@@ -189,6 +190,9 @@ export async function ensureSessionInitialized(
     state.prune.batches = Array.isArray(persisted.prune.batches) ? persisted.prune.batches : []
     state.prune.preview = persisted.prune.preview ?? null
     state.prune.messages = loadPruneMessagesState(persisted.prune.messages)
+    if (persisted.pruneEpisode?.compaction === state.lastCompaction) {
+        state.pruneEpisode = { ...persisted.pruneEpisode, pending: undefined }
+    }
     state.nudges.contextLimitAnchors = new Set<string>(persisted.nudges.contextLimitAnchors || [])
     state.nudges.turnNudgeAnchors = new Set<string>([
         ...state.nudges.turnNudgeAnchors,

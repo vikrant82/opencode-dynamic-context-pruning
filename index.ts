@@ -4,6 +4,7 @@ import { createCompressMessageTool, createCompressRangeTool } from "./lib/compre
 import {
     compressDisabledByOpencode,
     hasExplicitToolPermission,
+    resolvePruneHostPermission,
     type HostPermissionSnapshot,
 } from "./lib/host-permissions"
 import { Logger } from "./lib/logger"
@@ -18,6 +19,7 @@ import {
 } from "./lib/hooks"
 import { configureClientAuth, isSecureMode } from "./lib/auth"
 import { startAutoUpdate } from "./lib/update"
+import { createAgentPruneTool } from "./lib/agent-prune"
 
 declare const __DCP_VERSION__: string
 
@@ -85,6 +87,10 @@ const server: Plugin = (async (ctx) => {
         ),
         event: createEventHandler(store, logger),
         tool: {
+            ...(config.prune.enabled &&
+                config.prune.permission !== "deny" && {
+                    dcp_prune: createAgentPruneTool({ ...compressToolContext, hostPermissions }),
+                }),
             ...(config.compress.permission !== "deny" && {
                 compress:
                     config.compress.mode === "message"
@@ -93,6 +99,11 @@ const server: Plugin = (async (ctx) => {
             }),
         },
         config: async (opencodeConfig) => {
+            if (
+                resolvePruneHostPermission({ global: opencodeConfig.permission, agents: {} }) ===
+                "deny"
+            )
+                config.prune.permission = "deny"
             if (
                 config.compress.permission !== "deny" &&
                 compressDisabledByOpencode(opencodeConfig.permission)
@@ -113,6 +124,7 @@ const server: Plugin = (async (ctx) => {
             }
 
             const toolsToAdd: string[] = []
+            if (config.prune.enabled) toolsToAdd.push("dcp_prune")
             if (config.compress.permission !== "deny" && !config.experimental.allowSubAgents) {
                 toolsToAdd.push("compress")
             }
@@ -128,16 +140,32 @@ const server: Plugin = (async (ctx) => {
             if (!hasExplicitToolPermission(opencodeConfig.permission, "compress")) {
                 const permission = opencodeConfig.permission ?? {}
                 opencodeConfig.permission = {
-                    ...permission,
+                    ...(typeof permission === "string" ? { "*": permission } : permission),
                     compress: config.compress.permission,
-                } as typeof permission
+                } as unknown as typeof permission
             }
 
-            hostPermissions.global = opencodeConfig.permission
+            if (config.prune.enabled) {
+                const permission = opencodeConfig.permission ?? {}
+                const existing =
+                    typeof permission === "object"
+                        ? (permission as Record<string, any>).dcp_prune
+                        : undefined
+                opencodeConfig.permission = {
+                    ...(typeof permission === "string" ? { "*": permission } : permission),
+                    dcp_prune:
+                        existing && typeof existing === "object"
+                            ? Object.prototype.hasOwnProperty.call(existing, "*")
+                                ? existing
+                                : { "*": config.prune.permission, ...existing }
+                            : (existing ?? config.prune.permission),
+                } as unknown as typeof permission
+            }
+            hostPermissions.global = structuredClone(opencodeConfig.permission)
             hostPermissions.agents = Object.fromEntries(
                 Object.entries(opencodeConfig.agent ?? {}).map(([name, agent]) => [
                     name,
-                    agent?.permission,
+                    structuredClone(agent?.permission),
                 ]),
             )
         },

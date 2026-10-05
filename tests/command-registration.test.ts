@@ -92,6 +92,35 @@ test("config hook registers both dcp and dcp-compress commands", async () => {
     assert.equal(typeof cfg.command["dcp-compress"].description, "string")
 })
 
+test("agent pruning is opt-in and stays primary-only even when other DCP support allows subagents", async () => {
+    writeDcpConfig({ autoUpdate: false })
+    const defaults: any = await plugin(createPluginInput())
+    assert.equal(defaults.tool.dcp_prune, undefined)
+    writeDcpConfig({
+        autoUpdate: false,
+        prune: { enabled: true, nudge: { growthTokens: 42 } },
+        experimental: { allowSubAgents: true },
+    })
+    const hooks: any = await plugin(createPluginInput())
+    assert.equal(typeof hooks.tool.dcp_prune.execute, "function")
+    const cfg: any = {}
+    await hooks.config(cfg)
+    assert.equal(cfg.permission.dcp_prune, "ask")
+    assert.deepEqual(cfg.experimental.primary_tools, ["dcp_prune"])
+})
+
+test("agent pruning preserves explicit host deny", async () => {
+    writeDcpConfig({ autoUpdate: false, prune: { enabled: true } })
+    const hooks: any = await plugin(createPluginInput())
+    const cfg: any = { permission: { dcp_prune: "deny" } }
+    await hooks.config(cfg)
+    assert.equal(cfg.permission.dcp_prune, "deny")
+    await assert.rejects(
+        hooks.tool.dcp_prune.execute({ args: "" }, { sessionID: "unavailable" }),
+        /disabled/,
+    )
+})
+
 test("config hook skips command registration when commands are disabled", async () => {
     writeDcpConfig({ autoUpdate: false, commands: { enabled: false } })
     const hooks: any = await plugin(createPluginInput())
@@ -101,4 +130,107 @@ test("config hook skips command registration when commands are disabled", async 
 
     assert.equal(cfg.command?.["dcp"], undefined)
     assert.equal(cfg.command?.["dcp-compress"], undefined)
+})
+
+test("explicit partial prune permission maps receive ask fallback while retaining denies", async () => {
+    writeDcpConfig({ autoUpdate: false, prune: { enabled: true } })
+    const hooks: any = await plugin(createPluginInput())
+    const cfg: any = { permission: { dcp_prune: { "batch:never": "deny" } } }
+    await hooks.config(cfg)
+    assert.deepEqual(cfg.permission.dcp_prune, { "*": "ask", "batch:never": "deny" })
+    const { resolvePruneHostPermission } = await import("../lib/host-permissions")
+    assert.equal(
+        resolvePruneHostPermission({ global: cfg.permission, agents: {} }, "build", "batch:fresh"),
+        "ask",
+    )
+    assert.equal(
+        resolvePruneHostPermission({ global: cfg.permission, agents: {} }, "build", "batch:never"),
+        "deny",
+    )
+})
+
+test("existing catchall ordering and explicit host allows are preserved and resolved", async () => {
+    writeDcpConfig({ autoUpdate: false, prune: { enabled: true } })
+    const hooks: any = await plugin(createPluginInput())
+    const cfg: any = { permission: { dcp_prune: { "batch:*": "deny", "*": "allow" } } }
+    await hooks.config(cfg)
+    assert.deepEqual(Object.keys(cfg.permission.dcp_prune), ["batch:*", "*"])
+    const { resolvePruneHostPermission } = await import("../lib/host-permissions")
+    assert.equal(
+        resolvePruneHostPermission({ global: cfg.permission, agents: {} }, "build", "batch:fresh"),
+        "allow",
+    )
+})
+
+test("partial permission registration asks through the public tool boundary", async () => {
+    writeDcpConfig({ autoUpdate: false, prune: { enabled: true } })
+    const input = createPluginInput()
+    const id = `ses_partial_${process.pid}`
+    const messages = [
+        {
+            info: { id: "u", sessionID: id, role: "user", time: { created: 1 } },
+            parts: [{ type: "text", text: "start" }],
+        },
+        {
+            info: { id: "a", sessionID: id, role: "assistant", time: { created: 2 } },
+            parts: [
+                { type: "step-start" },
+                {
+                    type: "tool",
+                    id: "p",
+                    callID: "c",
+                    tool: "read",
+                    state: {
+                        status: "completed",
+                        input: {},
+                        output: "result ".repeat(100),
+                        time: { start: 1, end: 2 },
+                    },
+                },
+            ],
+        },
+        {
+            info: { id: "u2", sessionID: id, role: "user", time: { created: 3 } },
+            parts: [{ type: "text", text: "next" }],
+        },
+        {
+            info: { id: "a2", sessionID: id, role: "assistant", time: { created: 4 } },
+            parts: [{ type: "step-start" }],
+        },
+    ]
+    input.client.session = {
+        messages: async () => ({ data: structuredClone(messages) }),
+        get: async () => ({ data: { id } }),
+    }
+    const hooks: any = await plugin(input)
+    const cfg: any = { permission: { dcp_prune: { "batch:never": "deny" } } }
+    await hooks.config(cfg)
+    const { resolvePruneHostPermission } = await import("../lib/host-permissions")
+    let approval: any
+    await assert.rejects(
+        hooks.tool.dcp_prune.execute(
+            { args: "--tools read" },
+            {
+                sessionID: id,
+                messageID: "a2",
+                agent: "build",
+                abort: new AbortController().signal,
+                ask: async (request: any) => {
+                    approval = request
+                    assert.equal(
+                        resolvePruneHostPermission(
+                            { global: cfg.permission, agents: {} },
+                            "build",
+                            request.patterns[0],
+                        ),
+                        "ask",
+                    )
+                    throw Object.assign(new Error("declined"), { name: "PermissionRejectedError" })
+                },
+            },
+        ),
+        /declined/,
+    )
+    assert.equal(approval.permission, "dcp_prune")
+    assert.deepEqual(approval.always, [])
 })

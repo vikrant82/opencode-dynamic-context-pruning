@@ -43,6 +43,7 @@ import { checkSession, ensureSessionInitialized, saveSessionState, syncToolCache
 import { takeUnnotifiedPrunedToolIds } from "./state/utils"
 import { cacheSystemPromptTokens } from "./ui/utils"
 import { sendUnifiedNotification } from "./ui/notification"
+import { appendPruneNudge, markPruneOutboundApplication } from "./agent-prune"
 
 const INTERNAL_AGENT_SIGNATURES = [
     "You are a title generator",
@@ -149,7 +150,9 @@ export function createChatMessageTransformHandler(
         syncCompressionBlocks(state, logger, output.messages)
         syncToolCache(state, config, logger, output.messages)
         buildToolIdList(state, output.messages)
+        const applicationMarked = markPruneOutboundApplication(state, output.messages)
         const prunedToolIds = prune(state, logger, config, output.messages)
+        if (applicationMarked) await saveSessionState(state, logger)
         const newPrunedToolIds = takeUnnotifiedPrunedToolIds(state, prunedToolIds)
         if (newPrunedToolIds.length > 0 && state.sessionId) {
             saveSessionState(state, logger).catch((error) => {
@@ -190,6 +193,24 @@ export function createChatMessageTransformHandler(
         injectMessageIds(state, config, output.messages, compressionPriorities)
         applyPendingManualTrigger(state, output.messages, logger)
         stripStaleMetadata(output.messages)
+        if (config.prune?.enabled) {
+            try {
+                const session = await client.session.get({ path: { id: sessionId } })
+                if (session.data && !session.error)
+                    await appendPruneNudge(
+                        state,
+                        config,
+                        logger,
+                        hostPermissions,
+                        output.messages,
+                        session.data.permission ?? [],
+                    )
+            } catch (error) {
+                logger.warn("Skipping prune nudge: session permissions unavailable", {
+                    error: String(error),
+                })
+            }
+        }
 
         // Session metrics snapshot (debug only)
         logger.debug("Session metrics", {
