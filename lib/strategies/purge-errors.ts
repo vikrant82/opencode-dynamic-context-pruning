@@ -52,6 +52,7 @@ export const purgeErrors = (
         if (!metadata) {
             continue
         }
+        if (metadata.tool === "dcp_prune") continue
 
         // Skip protected tools
         if (isToolNameProtected(metadata.tool, protectedTools)) {

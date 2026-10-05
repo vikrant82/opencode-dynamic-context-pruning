@@ -6,6 +6,18 @@ import { Logger } from "../lib/logger"
 
 export function buildPruneConfig(overrides?: { protectedTools?: string[] }): PluginConfig {
     return {
+        prune: {
+            enabled: false,
+            permission: "ask",
+            nudge: {
+                enabled: true,
+                contextThreshold: 200000,
+                minSavingsRatio: 0.2,
+                growthTokens: 50000,
+                olderThan: 1,
+                tools: ["*"],
+            },
+        },
         enabled: true,
         debug: false,
         autoUpdate: false,

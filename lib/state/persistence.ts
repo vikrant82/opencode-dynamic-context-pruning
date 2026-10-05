@@ -46,6 +46,7 @@ export interface PersistedNudges {
 }
 
 export interface PersistedSessionState {
+    pruneEpisode?: SessionState["pruneEpisode"]
     sessionName?: string
     manualMode?: boolean
     prune: PersistedPrune
@@ -100,6 +101,7 @@ export async function saveSessionState(
         }
 
         const state: PersistedSessionState = {
+            pruneEpisode: sessionState.pruneEpisode,
             sessionName: sessionName,
             manualMode: !!sessionState.manualMode,
             prune: {

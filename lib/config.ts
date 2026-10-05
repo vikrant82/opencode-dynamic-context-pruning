@@ -64,6 +64,7 @@ export interface ExperimentalConfig {
 }
 
 export interface PluginConfig {
+    prune: PruneConfig
     enabled: boolean
     autoUpdate: boolean
     debug: boolean
@@ -84,6 +85,19 @@ export interface PluginConfig {
 
 type CompressOverride = Partial<CompressConfig>
 
+export interface PruneConfig {
+    enabled: boolean
+    permission: "ask" | "deny"
+    nudge: {
+        enabled: boolean
+        contextThreshold: number
+        minSavingsRatio: number
+        growthTokens: number
+        olderThan: number
+        tools: string[]
+    }
+}
+
 const DEFAULT_PROTECTED_TOOLS = [
     "task",
     "skill",
@@ -101,6 +115,16 @@ const DEFAULT_PROTECTED_TOOLS = [
 const COMPRESS_DEFAULT_PROTECTED_TOOLS = ["task", "skill", "todowrite", "todoread"]
 
 export const VALID_CONFIG_KEYS = new Set([
+    "prune",
+    "prune.enabled",
+    "prune.permission",
+    "prune.nudge",
+    "prune.nudge.enabled",
+    "prune.nudge.contextThreshold",
+    "prune.nudge.minSavingsRatio",
+    "prune.nudge.growthTokens",
+    "prune.nudge.olderThan",
+    "prune.nudge.tools",
     "$schema",
     "enabled",
     "autoUpdate",
@@ -183,6 +207,63 @@ interface ValidationError {
 
 export function validateConfigTypes(config: Record<string, any>): ValidationError[] {
     const errors: ValidationError[] = []
+
+    if (config.prune !== undefined) {
+        const p = config.prune
+        if (!p || typeof p !== "object" || Array.isArray(p)) {
+            errors.push({ key: "prune", expected: "object", actual: typeof p })
+        } else {
+            for (const [key, value] of [
+                ["prune.enabled", p.enabled],
+                ["prune.nudge.enabled", p.nudge?.enabled],
+            ] as const) {
+                if (value !== undefined && typeof value !== "boolean")
+                    errors.push({ key, expected: "boolean", actual: typeof value })
+            }
+            if (p.permission !== undefined && !["ask", "deny"].includes(p.permission))
+                errors.push({
+                    key: "prune.permission",
+                    expected: '"ask" | "deny"',
+                    actual: String(p.permission),
+                })
+            if (
+                p.nudge !== undefined &&
+                (!p.nudge || typeof p.nudge !== "object" || Array.isArray(p.nudge))
+            )
+                errors.push({ key: "prune.nudge", expected: "object", actual: typeof p.nudge })
+            for (const key of [
+                "contextThreshold",
+                "growthTokens",
+                "olderThan",
+                "minSavingsRatio",
+            ]) {
+                const value = p.nudge?.[key]
+                if (
+                    value !== undefined &&
+                    (typeof value !== "number" ||
+                        !Number.isFinite(value) ||
+                        value < (key === "olderThan" ? 1 : 0) ||
+                        (key === "olderThan" && !Number.isSafeInteger(value)) ||
+                        (key === "minSavingsRatio" && value > 1))
+                )
+                    errors.push({
+                        key: `prune.nudge.${key}`,
+                        expected: "finite nonnegative number (ratio <= 1; age positive integer)",
+                        actual: String(value),
+                    })
+            }
+            if (
+                p.nudge?.tools !== undefined &&
+                (!Array.isArray(p.nudge.tools) ||
+                    !p.nudge.tools.every((v: unknown) => typeof v === "string"))
+            )
+                errors.push({
+                    key: "prune.nudge.tools",
+                    expected: "string[]",
+                    actual: typeof p.nudge.tools,
+                })
+        }
+    }
 
     if (config.enabled !== undefined && typeof config.enabled !== "boolean") {
         errors.push({ key: "enabled", expected: "boolean", actual: typeof config.enabled })
@@ -753,6 +834,18 @@ function showConfigWarnings(
 }
 
 const defaultConfig: PluginConfig = {
+    prune: {
+        enabled: false,
+        permission: "ask",
+        nudge: {
+            enabled: true,
+            contextThreshold: 200000,
+            minSavingsRatio: 0.2,
+            growthTokens: 50000,
+            olderThan: 1,
+            tools: ["*"],
+        },
+    },
     enabled: true,
     autoUpdate: true,
     debug: false,
@@ -1017,6 +1110,10 @@ function mergeExperimental(
 function deepCloneConfig(config: PluginConfig): PluginConfig {
     return {
         ...config,
+        prune: {
+            ...config.prune,
+            nudge: { ...config.prune.nudge, tools: [...config.prune.nudge.tools] },
+        },
         commands: {
             enabled: config.commands.enabled,
             protectedTools: [...config.commands.protectedTools],
@@ -1053,6 +1150,13 @@ function deepCloneConfig(config: PluginConfig): PluginConfig {
 
 function mergeLayer(config: PluginConfig, data: Record<string, any>): PluginConfig {
     return {
+        prune: validateConfigTypes({ prune: data.prune }).length
+            ? config.prune
+            : {
+                  ...config.prune,
+                  ...data.prune,
+                  nudge: { ...config.prune.nudge, ...data.prune?.nudge },
+              },
         enabled: data.enabled ?? config.enabled,
         autoUpdate: data.autoUpdate ?? config.autoUpdate,
         debug: data.debug ?? config.debug,

@@ -37,6 +37,36 @@
             "default": "chat",
             "description": "Where to display notifications (chat message or toast notification)"
         },
+        "prune": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": { "type": "boolean", "default": false },
+                "permission": { "type": "string", "enum": ["ask", "deny"], "default": "ask" },
+                "nudge": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean", "default": true },
+                        "contextThreshold": { "type": "number", "minimum": 0, "default": 200000 },
+                        "minSavingsRatio": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.2
+                        },
+                        "growthTokens": { "type": "number", "minimum": 0, "default": 50000 },
+                        "olderThan": { "type": "integer", "minimum": 1, "default": 1 },
+                        "tools": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "default": ["*"],
+                            "description": "Explicit selectors override protections, including wildcard *."
+                        }
+                    }
+                }
+            }
+        },
         "commands": {
             "type": "object",
             "description": "Configuration for DCP slash commands (/dcp)",

@@ -7,10 +7,11 @@ import { getLastRealUserMessageIndex, getLastUserMessage } from "./query"
 import type { UserMessage } from "@opencode-ai/sdk/v2"
 import { deduplicate, purgeErrors, staleTools } from "../strategies"
 
-const PRUNED_TOOL_OUTPUT_REPLACEMENT =
+export const PRUNED_TOOL_OUTPUT_REPLACEMENT =
     "[Output removed to save context - information superseded or no longer needed]"
-const PRUNED_TOOL_ERROR_INPUT_REPLACEMENT = "[input removed due to failed tool call]"
-const PRUNED_QUESTION_INPUT_REPLACEMENT = "[questions removed - see output for user's answers]"
+export const PRUNED_TOOL_ERROR_INPUT_REPLACEMENT = "[input removed due to failed tool call]"
+export const PRUNED_QUESTION_INPUT_REPLACEMENT =
+    "[questions removed - see output for user's answers]"
 
 export const prune = (
     state: SessionState,
@@ -61,6 +62,7 @@ const pruneFullTool = (state: SessionState, logger: Logger, messages: WithParts[
             if (part.type !== "tool") {
                 continue
             }
+            if (part.tool === "dcp_prune") continue
 
             if (!state.prune.tools.has(part.callID)) {
                 continue
@@ -104,6 +106,7 @@ const pruneToolOutputs = (state: SessionState, logger: Logger, messages: WithPar
             if (part.type !== "tool") {
                 continue
             }
+            if (part.tool === "dcp_prune") continue
             if (!state.prune.tools.has(part.callID)) {
                 continue
             }
@@ -136,6 +139,7 @@ const pruneToolInputs = (state: SessionState, logger: Logger, messages: WithPart
             if (part.type !== "tool") {
                 continue
             }
+            if (part.tool === "dcp_prune") continue
 
             if (!state.prune.tools.has(part.callID)) {
                 continue
@@ -165,6 +169,7 @@ const pruneToolErrors = (state: SessionState, logger: Logger, messages: WithPart
             if (part.type !== "tool") {
                 continue
             }
+            if (part.tool === "dcp_prune") continue
             if (!state.prune.tools.has(part.callID)) {
                 continue
             }
